@@ -1,0 +1,15 @@
+[package]
+name = "hp41c"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "hp41c"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hp41c"
+path = "src/main.rs"
+
+[dependencies]
+crossterm = "0.27"
