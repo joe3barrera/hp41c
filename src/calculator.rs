@@ -584,10 +584,16 @@ impl HP41CCalculator {
         let mut status_parts = Vec::new();
         
         // Special handling for commands waiting for arguments
-        let cmd_display = if matches!(self.command_buffer.as_str(), "fix" | "sci" | "eng") {
-            format!("CMD: [{} _]", self.command_buffer)
-        } else if matches!(self.command_buffer.as_str(), "sto" | "rcl") {
-            format!("CMD: [{} __]", self.command_buffer)
+        let cmd_display = if self.command_buffer == "fix " {
+            "CMD: [fix _]".to_string()
+        } else if self.command_buffer == "sci " {
+            "CMD: [sci _]".to_string()
+        } else if self.command_buffer == "eng " {
+            "CMD: [eng _]".to_string()
+        } else if self.command_buffer == "sto " {
+            "CMD: [sto __]".to_string()
+        } else if self.command_buffer == "rcl " {
+            "CMD: [rcl __]".to_string()
         } else if self.command_buffer.starts_with("sto ") || self.command_buffer.starts_with("rcl ") {
             let parts: Vec<&str> = self.command_buffer.split_whitespace().collect();
             if parts.len() == 2 && parts[1].len() == 1 {
