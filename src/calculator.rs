@@ -125,10 +125,37 @@ impl HP41CCalculator {
                 Ok(None)
             }
             "sst" => {
-                Ok(Some("SST not implemented".to_string()))
+                // Single Step - advance program counter and show next instruction
+                if !self.programming.program.is_empty() {
+                    self.programming.program_counter += 1;
+                    if self.programming.program_counter >= self.programming.program.len() {
+                        self.programming.program_counter = 0; // Wrap around
+                    }
+                    if let Some(instr) = self.programming.get_current_instruction() {
+                        Ok(Some(format!("{:02} {}", instr.line_number, instr)))
+                    } else {
+                        Ok(Some("End of program".to_string()))
+                    }
+                } else {
+                    Ok(Some("No program".to_string()))
+                }
             }
             "bst" => {
-                Ok(Some("BST not implemented".to_string()))
+                // Back Step - move program counter back
+                if !self.programming.program.is_empty() {
+                    if self.programming.program_counter > 0 {
+                        self.programming.program_counter -= 1;
+                    } else {
+                        self.programming.program_counter = self.programming.program.len() - 1; // Wrap to end
+                    }
+                    if let Some(instr) = self.programming.get_current_instruction() {
+                        Ok(Some(format!("{:02} {}", instr.line_number, instr)))
+                    } else {
+                        Ok(Some("Start of program".to_string()))
+                    }
+                } else {
+                    Ok(Some("No program".to_string()))
+                }
             }
             "prgm" => {
                 self.programming.clear_program();
@@ -270,7 +297,6 @@ impl HP41CCalculator {
                             Err("RCL requires register number".to_string())
                         }
                     }
-                    // Unary mathematical functions
                     cmd @ ("sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "log" | "ln" | "exp" | "sqrt" | "inv") => {
                         let x_val = self.stack[0];
                         
@@ -634,10 +660,17 @@ impl HP41CCalculator {
 
         // Program display line
         if self.programming.is_programming {
-            if let Some(current_instr) = self.programming.get_current_instruction() {
+            if let Some(current_instr) = self.programming.program.get(self.programming.current_line as usize - 1) {
                 lines.push(format!(">{:02} {}", current_instr.line_number, current_instr));
             } else {
                 lines.push(format!(">{:02} _", self.programming.current_line));
+            }
+        } else if !self.programming.program.is_empty() {
+            // In run mode with a program, show current program position
+            if let Some(current_instr) = self.programming.get_current_instruction() {
+                lines.push(format!(" {:02} {}", current_instr.line_number, current_instr));
+            } else {
+                lines.push(format!(" {:02} END", self.programming.program_counter + 1));
             }
         } else {
             lines.push("".to_string());
