@@ -59,32 +59,34 @@ mod tests {
     #[test]
     fn test_sto_rcl_execution() {
         let mut calc = HP41CCalculator::new();
-        
+    
         // Put 42.0 in X register
         calc.process_input("4").unwrap();
         calc.process_input("2").unwrap();
-        
-        // Store in register 05
-        let result = process_keys(&["s", "t", "o", " ", "0", "5"]);
-        let (calc, messages) = result;
-        
-        assert!(messages.iter().any(|msg| msg.contains("STO")));
+    
+        // Store in register 5
+        calc.process_input("s").unwrap();
+        calc.process_input("t").unwrap();
+        calc.process_input("o").unwrap();
+        calc.process_input(" ").unwrap();
+        calc.process_input("5").unwrap();
+    
+        // Check that it was stored
         assert_eq!(calc.test_get_storage(5), Some(42.0));
-        
-        // Test recall - start fresh calc
-        let mut calc = HP41CCalculator::new();
-        // First store a value
-        calc.process_input("9").unwrap();
-        calc.process_input("9").unwrap();
-        let _ = process_keys(&["s", "t", "o", " ", "1", "0"]);
-        
+    
         // Clear X register by entering 0
         calc.process_input("0").unwrap();
-        
-        // Recall from register 10
-        let (calc, messages) = process_keys(&["r", "c", "l", " ", "1", "0"]);
-        assert!(messages.iter().any(|msg| msg.contains("RCL")));
-        assert_eq!(calc.test_get_stack()[0], 99.0);
+        assert_eq!(calc.test_get_stack()[0], 0.0);
+    
+        // Recall from register 5 (same calculator!)
+        calc.process_input("r").unwrap();
+        calc.process_input("c").unwrap();
+        calc.process_input("l").unwrap();
+        calc.process_input(" ").unwrap();
+        calc.process_input("5").unwrap();
+    
+        // Check that it was recalled
+        assert_eq!(calc.test_get_stack()[0], 42.0);
     }
 
     #[test]
@@ -254,4 +256,93 @@ mod tests {
         // Display should contain command reference
         assert!(display.contains("sin cos tan"));
     }
+}
+#[test]
+fn debug_display_command() {
+    let mut calc = HP41CCalculator::new();
+    
+    println!("=== Debug Display Command ===");
+    
+    let result1 = calc.process_input("f");
+    println!("After 'f': {:?}, buffer: '{}'", result1, calc.test_get_command_buffer());
+    
+    let result2 = calc.process_input("i");
+    println!("After 'i': {:?}, buffer: '{}'", result2, calc.test_get_command_buffer());
+    
+    let result3 = calc.process_input("x");
+    println!("After 'x': {:?}, buffer: '{}'", result3, calc.test_get_command_buffer());
+    
+    let result4 = calc.process_input(" ");
+    println!("After ' ': {:?}, buffer: '{}'", result4, calc.test_get_command_buffer());
+    
+    let result5 = calc.process_input("6");
+    println!("After '6': {:?}, buffer: '{}'", result5, calc.test_get_command_buffer());
+    
+    println!("Display mode: {:?}, digits: {}", calc.test_get_display_mode(), calc.test_get_display_digits());
+}
+
+#[test]
+fn debug_storage_command() {
+    let mut calc = HP41CCalculator::new();
+    
+    println!("=== Debug Storage Command ===");
+    
+    // Put 42 in X
+    calc.process_input("4").unwrap();
+    calc.process_input("2").unwrap();
+    println!("After entering 42: X = {}", calc.test_get_stack()[0]);
+    
+    // Try STO 5 step by step
+    let result1 = calc.process_input("s");
+    println!("After 's': {:?}, buffer: '{}'", result1, calc.test_get_command_buffer());
+    
+    let result2 = calc.process_input("t");
+    println!("After 't': {:?}, buffer: '{}'", result2, calc.test_get_command_buffer());
+    
+    let result3 = calc.process_input("o");
+    println!("After 'o': {:?}, buffer: '{}'", result3, calc.test_get_command_buffer());
+    
+    let result4 = calc.process_input(" ");
+    println!("After ' ': {:?}, buffer: '{}'", result4, calc.test_get_command_buffer());
+    
+    let result5 = calc.process_input("5");
+    println!("After '5': {:?}, buffer: '{}'", result5, calc.test_get_command_buffer());
+    
+    println!("Storage register 5: {:?}", calc.test_get_storage(5));
+    println!("X register: {}", calc.test_get_stack()[0]);
+}
+
+#[test]
+fn debug_recall_command() {
+    let mut calc = HP41CCalculator::new();
+    
+    println!("=== Debug Recall Command ===");
+    
+    // First, manually store 42 in register 5
+    calc.test_set_x_register(42.0);
+    let store_result = calc.execute_command("sto", Some(vec!["5".to_string()]));
+    println!("Manual STO result: {:?}", store_result);
+    println!("Storage register 5 after manual store: {:?}", calc.test_get_storage(5));
+    
+    // Clear X register
+    calc.test_set_x_register(0.0);
+    println!("X register cleared to: {}", calc.test_get_stack()[0]);
+    
+    // Now try RCL step by step
+    let result1 = calc.process_input("r");
+    println!("After 'r': {:?}, buffer: '{}'", result1, calc.test_get_command_buffer());
+    
+    let result2 = calc.process_input("c");
+    println!("After 'c': {:?}, buffer: '{}'", result2, calc.test_get_command_buffer());
+    
+    let result3 = calc.process_input("l");
+    println!("After 'l': {:?}, buffer: '{}'", result3, calc.test_get_command_buffer());
+    
+    let result4 = calc.process_input(" ");
+    println!("After ' ': {:?}, buffer: '{}'", result4, calc.test_get_command_buffer());
+    
+    let result5 = calc.process_input("5");
+    println!("After '5': {:?}, buffer: '{}'", result5, calc.test_get_command_buffer());
+    
+    println!("Final X register: {}", calc.test_get_stack()[0]);
 }

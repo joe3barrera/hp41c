@@ -215,7 +215,12 @@ impl HP41CCalculator {
 
     fn handle_space(&mut self) -> Result<Option<String>, String> {
         if !self.command_buffer.is_empty() {
-            self.process_command()
+            // Don't execute if command buffer ends with space (waiting for arguments)
+            if self.command_buffer.ends_with(' ') {
+                Ok(None)
+            } else {
+                self.process_command()
+            }
         } else {
             Ok(None)
         }
@@ -253,7 +258,7 @@ impl HP41CCalculator {
         if parts.len() >= 2 {
             match parts[0] {
                 "fix" | "sci" | "eng" if parts[1].len() == 1 => self.process_command(),
-                "sto" | "rcl" if parts[1].len() == 2 => self.process_command(),
+                "sto" | "rcl" if parts[1].len() >= 1 => self.process_command(), // Changed: accept 1 or more digits
                 _ => Ok(None),
             }
         } else {
@@ -396,5 +401,10 @@ impl HP41CCalculator {
     
     pub fn test_add_program_instruction(&mut self, cmd: &str, args: Option<Vec<String>>) {
         self.programming.add_instruction(cmd, args, cmd);
+    }
+
+    pub fn process_command_string(&mut self, cmd: &str) -> Result<Option<String>, String> {
+    	self.command_buffer = cmd.to_string();
+        self.process_command()
     }
 }
