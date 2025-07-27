@@ -5,11 +5,13 @@
 /// is definitely not pining for the fjords.
 
 use crate::programming::ProgrammingMode;
-use crate::display::{DisplayFormatter};
+use crate::display::DisplayFormatter;
 use crate::commands::{CommandTrie, initialize_command_trie};
 use crate::stack::Stack;
 use crate::input::InputState;
 use crate::execution::execute_command;
+#[cfg(test)]
+use crate::display::DisplayMode;
 
 /// Maximum number of storage registers
 const NUM_STORAGE_REGISTERS: usize = 100;
@@ -340,7 +342,7 @@ impl Default for HP41CCalculator {
 // Provide read-only access for tests
 #[cfg(test)]
 impl HP41CCalculator {
-    pub fn test_get_stack(&self) -> &[f64] {
+    pub fn test_get_stack(&self) -> [f64; 4] {
         self.stack.get_registers()
     }
     

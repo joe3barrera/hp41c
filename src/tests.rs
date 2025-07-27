@@ -1,4 +1,4 @@
-use hp41c::*;
+use crate::*;
 
 #[cfg(test)]
 mod tests {
@@ -89,19 +89,17 @@ mod tests {
 
     #[test]
     fn test_display_modes() {
-        let mut calc = HP41CCalculator::new();
-        
         // Test FIX mode
-        let (mut calc, messages) = process_keys(&["f", "i", "x", " ", "6"]);
-        assert!(messages.iter().any(|msg| msg.contains("FIX 6")));
-        
+    	let (_calc, messages) = process_keys(&["f", "i", "x", " ", "6"]);
+    	assert!(messages.iter().any(|msg| msg.contains("FIX 6")));
+    
         // Test SCI mode  
-        let (mut calc, messages) = process_keys(&["s", "c", "i", " ", "3"]);
-        assert!(messages.iter().any(|msg| msg.contains("SCI 3")));
-        
+    	let (_calc, messages) = process_keys(&["s", "c", "i", " ", "3"]);
+	    assert!(messages.iter().any(|msg| msg.contains("SCI 3")));
+    
         // Test ENG mode
-        let (mut calc, messages) = process_keys(&["e", "n", "g", " ", "2"]);
-        assert!(messages.iter().any(|msg| msg.contains("ENG 2")));
+	let (_calc, messages) = process_keys(&["e", "n", "g", " ", "2"]);
+	assert!(messages.iter().any(|msg| msg.contains("ENG 2")));
     }
 
     #[test]

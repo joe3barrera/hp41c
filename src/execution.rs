@@ -23,6 +23,33 @@ pub fn execute_command(
     let command = command.to_lowercase();
     
     match command.as_str() {
+        // Arithmetic operators
+        "+" => {
+            stack.add()?;
+            input.clear();
+            Ok(None)
+        }
+        "-" => {
+            stack.subtract()?;
+            input.clear();
+            Ok(None)
+        }
+        "*" => {
+            stack.multiply()?;
+            input.clear();
+            Ok(None)
+        }
+        "/" => {
+            stack.divide()?;
+            input.clear();
+            Ok(None)
+        }
+        "^" => {
+            stack.power()?;
+            input.clear();
+            Ok(None)
+        }
+
         // Math functions
         "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | 
         "log" | "ln" | "exp" | "sqrt" | "inv" => {
