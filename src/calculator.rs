@@ -1,715 +1,445 @@
-use crate::programming::ProgrammingMode;
-use crate::display::{DisplayMode, DisplayFormatter};
-use crate::commands::{CommandTrie, initialize_command_trie};
+/// HP-41C Calculator Core
+/// 
+/// This module coordinates between all the calculator subsystems to provide
+/// a complete HP-41C emulation. Unlike a Norwegian Blue HP-6S, this calculator
+/// is definitely not pining for the fjords.
 
+use crate::programming::ProgrammingMode;
+//use crate::display::{DisplayMode, DisplayFormatter};
+use crate::display::{DisplayFormatter};
+use crate::commands::{CommandTrie, initialize_command_trie};
+use crate::stack::Stack;
+use crate::input::InputState;
+use crate::execution::execute_command;
+//use crate::error::{CalculatorError, CalculatorResult};
+
+/// Maximum number of storage registers
+const NUM_STORAGE_REGISTERS: usize = 100;
+
+/// HP-41C Calculator State
 #[derive(Debug)]
 pub struct HP41CCalculator {
-    pub stack: [f64; 4],
-    pub stack_lifted: bool,
-    pub display_value: f64,
-    pub entering_number: bool,
-    pub number_entry_string: String,
-    pub command_buffer: String,
-    pub eex_mode: bool,
-    pub eex_digits: String,
-    pub arc_mode: bool,
-    pub programming: ProgrammingMode,
-    pub command_trie: CommandTrie,
-    pub show_flags: bool,
-    pub display_formatter: DisplayFormatter,
-    pub storage_registers: [f64; 100],
+    // Core components
+    stack: Stack,
+    input: InputState,
+    programming: ProgrammingMode,
+    display_formatter: DisplayFormatter,
+    
+    // Command processing
+    command_buffer: String,
+    command_trie: CommandTrie,
+    
+    // Storage
+    storage_registers: [f64; NUM_STORAGE_REGISTERS],
+    
+    // UI state
+    show_flags: bool,
 }
 
 impl HP41CCalculator {
+    /// Create a new calculator instance
     pub fn new() -> Self {
         HP41CCalculator {
-            stack: [0.0; 4],
-            stack_lifted: false,
-            display_value: 0.0,
-            entering_number: false,
-            number_entry_string: String::new(),
-            command_buffer: String::new(),
-            eex_mode: false,
-            eex_digits: String::new(),
-            arc_mode: false,
+            stack: Stack::new(),
+            input: InputState::new(),
             programming: ProgrammingMode::new(),
-            command_trie: initialize_command_trie(),
-            show_flags: false,
             display_formatter: DisplayFormatter::new(),
-            storage_registers: [0.0; 100],
+            command_buffer: String::new(),
+            command_trie: initialize_command_trie(),
+            storage_registers: [0.0; NUM_STORAGE_REGISTERS],
+            show_flags: false,
         }
     }
 
-    pub fn lift_stack(&mut self) {
-        self.stack[3] = self.stack[2]; // T = Z
-        self.stack[2] = self.stack[1]; // Z = Y
-        self.stack[1] = self.stack[0]; // Y = X
-    }
-
-    pub fn binary_operation(&mut self, operation: &str) -> Result<(), String> {
-        let y_val = self.stack[1];
-        let x_val = self.stack[0];
-
-        let result = match operation {
-            "+" => y_val + x_val,
-            "-" => y_val - x_val,
-            "*" => y_val * x_val,
-            "/" => {
-                if x_val == 0.0 {
-                    return Err("Division by zero".to_string());
-                }
-                y_val / x_val
-            }
-            "^" => y_val.powf(x_val),
-            _ => return Err(format!("Unknown operation {}", operation)),
-        };
-
-        // Drop stack and put result in X
-        // HP behavior: stack drops, T gets copy of original T (not 0)
-        self.stack[0] = result;
-        self.stack[1] = self.stack[2]; // Y = Z
-        self.stack[2] = self.stack[3]; // Z = T
-        self.stack[3] = self.stack[3]; // T = T (stays the same, gets duplicated)
-
-        self.display_value = result;
-        self.stack_lifted = true;
-        self.entering_number = false;
-        self.number_entry_string.clear(); // Clear any number entry
-        Ok(())
-    }
-
-    pub fn execute_command(&mut self, command: &str, args: Option<Vec<String>>) -> Result<Option<String>, String> {
-        let args = args.unwrap_or_default();
-        let command = command.to_lowercase();
-
-        match command.as_str() {
-            "lbl" => {
-                if self.programming.is_programming && !args.is_empty() {
-                    self.programming.add_instruction("LBL", Some(args.clone()), &format!("LBL {}", args[0]));
-                    Ok(None)
-                } else if args.is_empty() {
-                    Err("LBL requires argument".to_string())
-                } else {
-                    Ok(None)
-                }
-            }
-            "gto" => {
-                if !args.is_empty() {
-                    if self.programming.goto_label(&args[0]) {
-                        Ok(None)
-                    } else {
-                        Err(format!("Label {} not found", args[0]))
-                    }
-                } else {
-                    Err("GTO requires argument".to_string())
-                }
-            }
-            "xeq" => {
-                if !args.is_empty() {
-                    if self.programming.execute_subroutine(&args[0]) {
-                        self.programming.is_running = true;
-                        Ok(None)
-                    } else {
-                        Err(format!("Label {} not found", args[0]))
-                    }
-                } else {
-                    Err("XEQ requires argument".to_string())
-                }
-            }
-            "rtn" => {
-                if self.programming.is_programming {
-                    self.programming.add_instruction("RTN", None, "RTN");
-                } else {
-                    self.programming.return_from_subroutine();
-                }
-                Ok(None)
-            }
-            "sst" => {
-                // Single Step - advance program counter and show next instruction
-                if !self.programming.program.is_empty() {
-                    self.programming.program_counter += 1;
-                    if self.programming.program_counter >= self.programming.program.len() {
-                        self.programming.program_counter = 0; // Wrap around
-                    }
-                    if let Some(instr) = self.programming.get_current_instruction() {
-                        Ok(Some(format!("{:02} {}", instr.line_number, instr)))
-                    } else {
-                        Ok(Some("End of program".to_string()))
-                    }
-                } else {
-                    Ok(Some("No program".to_string()))
-                }
-            }
-            "bst" => {
-                // Back Step - move program counter back
-                if !self.programming.program.is_empty() {
-                    if self.programming.program_counter > 0 {
-                        self.programming.program_counter -= 1;
-                    } else {
-                        self.programming.program_counter = self.programming.program.len() - 1; // Wrap to end
-                    }
-                    if let Some(instr) = self.programming.get_current_instruction() {
-                        Ok(Some(format!("{:02} {}", instr.line_number, instr)))
-                    } else {
-                        Ok(Some("Start of program".to_string()))
-                    }
-                } else {
-                    Ok(Some("No program".to_string()))
-                }
-            }
-            "prgm" => {
-                self.programming.clear_program();
-                Ok(Some("Program cleared".to_string()))
-            }
-            _ => {
-                // If in programming mode, record most commands
-                if self.programming.is_programming && 
-                   !matches!(command.as_str(), "gto" | "xeq" | "sst" | "bst" | "prgm") {
-                    self.programming.add_instruction(&command.to_uppercase(), Some(args), &self.command_buffer);
-                    return Ok(None);
-                }
-
-                // Mathematical and stack operations
-                match command.as_str() {
-                    "enter" => {
-                        self.lift_stack();
-                        self.stack_lifted = false; // Key: ENTER doesn't set stack_lifted!
-                        self.entering_number = false;
-                        self.number_entry_string.clear(); // Clear the entry string
-                        Ok(None)
-                    }
-                    "swap" => {
-                        self.stack.swap(0, 1);
-                        self.display_value = self.stack[0];
-                        Ok(None)
-                    }
-                    "clx" => {
-                        self.stack[0] = 0.0;
-                        self.display_value = 0.0;
-                        self.entering_number = false;
-                        Ok(None)
-                    }
-                    "clr" => {
-                        self.stack = [0.0; 4];
-                        self.display_value = 0.0;
-                        self.entering_number = false;
-                        Ok(None)
-                    }
-                    "chs" => {
-                        self.stack[0] = -self.stack[0];
-                        self.display_value = self.stack[0];
-                        Ok(None)
-                    }
-                    "arc" => {
-                        self.arc_mode = true;
-                        Ok(None)
-                    }
-                    "eex" => {
-                        self.eex_mode = true;
-                        self.eex_digits.clear();
-                        Ok(None)
-                    }
-                    "fix" => {
-                        if !args.is_empty() {
-                            if let Ok(digits) = args[0].parse::<usize>() {
-                                if digits <= 9 {
-                                    self.display_formatter.mode = DisplayMode::Fix;
-                                    self.display_formatter.digits = digits;
-                                    Ok(Some(format!("FIX {}", digits)))
-                                } else {
-                                    Err("FIX digits must be 0-9".to_string())
-                                }
-                            } else {
-                                Err("FIX requires numeric argument".to_string())
-                            }
-                        } else {
-                            Err("FIX requires argument (0-9)".to_string())
-                        }
-                    }
-                    "sci" => {
-                        if !args.is_empty() {
-                            if let Ok(digits) = args[0].parse::<usize>() {
-                                if digits <= 9 {
-                                    self.display_formatter.mode = DisplayMode::Sci;
-                                    self.display_formatter.digits = digits;
-                                    Ok(Some(format!("SCI {}", digits)))
-                                } else {
-                                    Err("SCI digits must be 0-9".to_string())
-                                }
-                            } else {
-                                Err("SCI requires numeric argument".to_string())
-                            }
-                        } else {
-                            Err("SCI requires argument (0-9)".to_string())
-                        }
-                    }
-                    "eng" => {
-                        if !args.is_empty() {
-                            if let Ok(digits) = args[0].parse::<usize>() {
-                                if digits <= 9 {
-                                    self.display_formatter.mode = DisplayMode::Eng;
-                                    self.display_formatter.digits = digits;
-                                    Ok(Some(format!("ENG {}", digits)))
-                                } else {
-                                    Err("ENG digits must be 0-9".to_string())
-                                }
-                            } else {
-                                Err("ENG requires numeric argument".to_string())
-                            }
-                        } else {
-                            Err("ENG requires argument (0-9)".to_string())
-                        }
-                    }
-                    "sto" => {
-                        if !args.is_empty() {
-                            if let Ok(register) = args[0].parse::<usize>() {
-                                if register < 100 {
-                                    self.storage_registers[register] = self.stack[0];
-                                    Ok(Some(format!("STO {}", register)))
-                                } else {
-                                    Err("Register must be 00-99".to_string())
-                                }
-                            } else {
-                                Err("Invalid register number".to_string())
-                            }
-                        } else {
-                            Err("STO requires register number".to_string())
-                        }
-                    }
-                    "rcl" => {
-                        if !args.is_empty() {
-                            if let Ok(register) = args[0].parse::<usize>() {
-                                if register < 100 {
-                                    if self.stack_lifted {
-                                        self.lift_stack();
-                                    }
-                                    self.stack[0] = self.storage_registers[register];
-                                    self.display_value = self.stack[0];
-                                    self.stack_lifted = true;
-                                    Ok(Some(format!("RCL {}", register)))
-                                } else {
-                                    Err("Register must be 00-99".to_string())
-                                }
-                            } else {
-                                Err("Invalid register number".to_string())
-                            }
-                        } else {
-                            Err("RCL requires register number".to_string())
-                        }
-                    }
-                    cmd @ ("sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "log" | "ln" | "exp" | "sqrt" | "inv") => {
-                        let x_val = self.stack[0];
-                        
-                        let mut actual_cmd = cmd;
-                        if self.arc_mode && matches!(cmd, "sin" | "cos" | "tan") {
-                            actual_cmd = match cmd {
-                                "sin" => "asin",
-                                "cos" => "acos", 
-                                "tan" => "atan",
-                                _ => cmd,
-                            };
-                            self.arc_mode = false;
-                        }
-
-                        let result = match actual_cmd {
-                            "sin" => x_val.sin(),
-                            "cos" => x_val.cos(),
-                            "tan" => x_val.tan(),
-                            "asin" => x_val.asin(),
-                            "acos" => x_val.acos(),
-                            "atan" => x_val.atan(),
-                            "log" => x_val.log10(),
-                            "ln" => x_val.ln(),
-                            "exp" => x_val.exp(),
-                            "sqrt" => x_val.sqrt(),
-                            "inv" => 1.0 / x_val,
-                            _ => return Err("Unknown function".to_string()),
-                        };
-
-                        if result.is_nan() || result.is_infinite() {
-                            return Err("Math error".to_string());
-                        }
-
-                        self.stack[0] = result;
-                        self.display_value = self.stack[0];
-                        self.stack_lifted = true;
-                        Ok(None)
-                    }
-                    "pi" => {
-                        // Set PI value directly
-                        if self.stack_lifted {
-                            self.lift_stack();
-                        }
-                        self.stack[0] = std::f64::consts::PI;
-                        self.display_value = self.stack[0];
-                        self.stack_lifted = true;
-                        self.entering_number = false;
-                        Ok(None)
-                    }
-                    "pow" => {
-                        self.binary_operation("^")?;
-                        Ok(None)
-                    }
-                    _ => Err(format!("Unknown command '{}'", command)),
-                }
-            }
-        }
-    }
-
+    /// Process a single keystroke
     pub fn process_input(&mut self, key: &str) -> Result<Option<String>, String> {
         match key {
-            ":" => {
-                let was_programming = self.programming.is_programming;
-                self.programming.toggle_programming_mode();
-                if was_programming {
-                    Ok(Some("Programming mode OFF".to_string()))
-                } else {
-                    Ok(Some("Programming mode ON".to_string()))
-                }
-            }
-            "R/S" => {
-                self.programming.is_running = !self.programming.is_running;
-                if self.programming.is_running {
-                    Ok(Some("Running...".to_string()))
-                } else {
-                    Ok(Some("Stopped".to_string()))
-                }
-            }
-            key if key == "\u{8}" || key == "\u{7f}" => { // Backspace or Delete
-                if !self.command_buffer.is_empty() {
-                    self.command_buffer.pop();
-                    Ok(None)
-                } else if self.entering_number {
-                    self.handle_number_backspace();
-                    Ok(None)
-                } else {
-                    Ok(None)
-                }
-            }
-            // In programming mode, store most operations instead of executing them
-            key if matches!(key, "+" | "-" | "*" | "/" | "^") => {
-                if self.programming.is_programming {
-                    self.programming.add_instruction(key, None, key);
-                    Ok(None)
-                } else {
-                    self.binary_operation(key)?;
-                    Ok(None)
-                }
-            }
-            "!" => {
-                if self.programming.is_programming {
-                    self.programming.add_instruction("!", None, "!");
-                    Ok(None)
-                } else {
-                    let x_val = self.stack[0];
-                    if x_val < 0.0 || x_val > 170.0 {
-                        return Err("Factorial domain error".to_string());
-                    }
-                    let result = gamma(x_val + 1.0);
-                    self.stack[0] = result;
-                    self.display_value = self.stack[0];
-                    self.stack_lifted = true;
-                    Ok(None)
-                }
-            }
-            // Handle digits and decimal point FIRST, before command processing
-            key if key.len() == 1 && (key.chars().next().unwrap().is_ascii_digit() || key == ".") => {
-                if self.programming.is_programming && self.command_buffer.is_empty() {
-                    // In programming mode with no command buffer, store digits as program steps
-                    self.programming.add_instruction(key, None, key);
-                    Ok(None)
-                } else if !self.command_buffer.is_empty() {
-                    // If we have a command buffer, add digits to it (for arguments like "LBL 01")
-                    self.command_buffer.push_str(key);
-                    
-                    // Check if this completes a command with arguments
-                    let parts: Vec<&str> = self.command_buffer.trim().split_whitespace().collect();
-                    if parts.len() >= 2 {
-                        let command = parts[0];
-                        // For FIX, SCI, ENG - execute immediately when we get the digit
-                        if matches!(command, "fix" | "sci" | "eng") && parts.len() == 2 {
-                            return self.process_command();
-                        }
-                        // For STO, RCL - execute immediately when we get 2 digits
-                        if matches!(command, "sto" | "rcl") && parts.len() == 2 && parts[1].len() == 2 {
-                            return self.process_command();
-                        }
-                    }
-                    Ok(None)
-                } else {
-                    // Normal calculator mode - process digits for number input
-                    self.handle_digit_input(key)?;
-                    Ok(None)
-                }
-            }
-            // Handle enter command specifically
-            "enter" => {
-                if self.programming.is_programming {
-                    self.programming.add_instruction("ENTER", None, "ENTER");
-                    Ok(None)
-                } else {
-                    self.lift_stack();
-                    self.stack_lifted = false; // Key: ENTER doesn't set stack_lifted!
-                    self.entering_number = false;
-                    self.number_entry_string.clear(); // Clear the entry string
-                    Ok(None)
-                }
-            }
-            // Handle other commands
-            key if key.chars().all(|c| c.is_ascii_alphabetic()) || key == " " => {
-                if key == " " {
-                    if !self.command_buffer.is_empty() {
-                        return self.process_command();
-                    }
-                    Ok(None)
-                } else {
-                    self.command_buffer.push_str(&key.to_lowercase());
-                    
-                    let (is_valid, is_complete, _) = self.command_trie.search(&self.command_buffer);
-                    
-                    if !is_valid {
-                        self.command_buffer.pop();
-                        Err("Invalid command".to_string())
-                    } else if is_complete && !matches!(self.command_buffer.as_str(), "lbl" | "gto" | "xeq" | "fix" | "sci" | "eng" | "sto" | "rcl") {
-                        // Command is complete and doesn't need arguments - execute immediately
-                        self.process_command()
-                    } else if matches!(self.command_buffer.as_str(), "fix" | "sci" | "eng" | "sto" | "rcl") {
-                        // These commands need arguments - add a space automatically
-                        self.command_buffer.push(' ');
-                        Ok(None)
-                    } else {
-                        // Command needs arguments or isn't complete yet
-                        Ok(None)
-                    }
-                }
-            }
+            // Special keys
+            ":" => self.toggle_programming_mode(),
+            "F" => Ok(self.toggle_flags()),
+            "\u{8}" | "\u{7f}" => self.handle_backspace(),
+            
+            // Operators (may be commands or operations)
+            "+" | "-" | "*" | "/" | "^" | "!" => self.handle_operator(key),
+            
+            // Numbers and decimal
+            "." | "0"..="9" => self.handle_digit(key),
+            
+            // Enter key
+            "enter" => self.handle_enter(),
+            
+            // Space (completes commands)
+            " " => self.handle_space(),
+            
+            // Letters (build commands)
+            c if c.chars().all(|ch| ch.is_ascii_alphabetic()) => self.handle_letter(c),
+            
             _ => Err(format!("Unknown key '{}'", key)),
         }
     }
 
-    fn handle_number_backspace(&mut self) {
-        if self.eex_mode {
-            if !self.eex_digits.is_empty() {
-                self.eex_digits.pop();
-            } else {
-                self.eex_mode = false;
-            }
-        } else if !self.number_entry_string.is_empty() {
-            self.number_entry_string.pop();
-            if self.number_entry_string.is_empty() {
-                self.display_value = 0.0;
-                self.stack[0] = 0.0;
-                self.entering_number = false;
-            } else {
-                // Re-parse the remaining string
-                if let Ok(value) = self.number_entry_string.parse::<f64>() {
-                    self.display_value = value;
-                    self.stack[0] = self.display_value;
-                } else {
-                    self.display_value = 0.0;
-                    self.stack[0] = 0.0;
-                    self.entering_number = false;
-                }
-            }
+    /// Get the current display (for UI)
+    pub fn get_display(&self) -> String {
+        let mut lines = Vec::with_capacity(8);
+        
+        // Stack display (4 lines)
+        self.add_stack_display(&mut lines);
+        
+        // Status line
+        lines.push(self.build_status_line());
+        
+        // Program line
+        lines.push(self.build_program_line());
+        
+        // Command reference (2 lines)
+        lines.push("sin cos tan asin acos atan log ln exp sqrt".to_string());
+        lines.push(if self.show_flags {
+            "pi inv arc  clx clr chs  +/-*^ ! ⌫  : lbl gto xeq sto rcl  F"
         } else {
-            self.display_value = 0.0;
-            self.stack[0] = 0.0;
-            self.entering_number = false;
-        }
+            "pi inv arc  clx clr chs  +/-*^ ! ⌫  : fix sci eng sto rcl  F(flags)"
+        }.to_string());
+        
+        lines.join("\n")
     }
 
-    fn handle_digit_input(&mut self, key: &str) -> Result<(), String> {
-        if !self.entering_number {
-            if self.stack_lifted {
-                self.lift_stack();
-            }
-            self.stack_lifted = false;
-            self.number_entry_string.clear();
-            self.entering_number = true;
-        }
-
-        if self.eex_mode {
-            if key.chars().all(|c| c.is_ascii_digit()) {
-                self.eex_digits.push_str(key);
-                // For EEX mode, we'll still need to format properly
-                let display_string = &self.number_entry_string;
-                let mantissa_str = if display_string.is_empty() { "0" } else { display_string };
-                let new_display = format!("{}E{}", mantissa_str, self.eex_digits);
-                if let Ok(value) = new_display.parse::<f64>() {
-                    self.display_value = value;
-                    self.stack[0] = self.display_value;
-                }
-            }
-        } else {
-            if key == "." && !self.number_entry_string.contains('.') {
-                self.number_entry_string.push('.');
-            } else if key.chars().all(|c| c.is_ascii_digit()) {
-                if self.number_entry_string == "0" {
-                    self.number_entry_string = key.to_string();
-                } else {
-                    self.number_entry_string.push_str(key);
-                }
-            } else {
-                return Ok(());
-            }
-
-            // Parse and store the value, but don't change the display string
-            match self.number_entry_string.parse::<f64>() {
-                Ok(value) => {
-                    self.display_value = value;
-                    self.stack[0] = self.display_value;
-                }
-                Err(_) => return Err("Invalid number".to_string()),
-            }
-        }
-
-        Ok(())
-    }
-
+    /// Process a complete command
     pub fn process_command(&mut self) -> Result<Option<String>, String> {
         if self.command_buffer.is_empty() {
             return Ok(None);
         }
 
-        // Clone the command buffer to avoid borrowing issues
-        let command_buffer = self.command_buffer.clone();
-        let parts: Vec<&str> = command_buffer.trim().split_whitespace().collect();
+        let buffer = self.command_buffer.clone();
+        let parts: Vec<&str> = buffer.split_whitespace().collect();
         let command = parts[0];
         let args = if parts.len() > 1 {
-            Some(parts[1..].iter().map(|s| s.to_string()).collect())
+            Some(parts[1..].iter().map(|&s| s.to_string()).collect())
         } else {
             None
         };
 
-        let (_, is_complete, _) = self.command_trie.search(command);
-        if !is_complete {
-            self.command_buffer.clear();
-            return Err(format!("Unknown command '{}'", command));
-        }
-
-        let result = self.execute_command(command, args)?;
         self.command_buffer.clear();
-        self.entering_number = false;
-
-        Ok(result)
+        
+        execute_command(
+            command,
+            args,
+            &mut self.stack,
+            &mut self.input,
+            &mut self.programming,
+            &mut self.display_formatter,
+            &mut self.storage_registers,
+        ).map_err(|e| e.to_string())
     }
 
-    pub fn get_display(&self) -> String {
-        let mut lines = Vec::new();
+    // === Private Implementation Details ===
 
-        // Display 4-level stack (T, Z, Y, X)
-        let register_names = ["T:", "Z:", "Y:", "X:"];
-        for i in 0..4 {
-            let value = self.stack[3 - i]; // T=3, Z=2, Y=1, X=0
-            let register_index = 3 - i;  // Actual register index: T=3, Z=2, Y=1, X=0
-            let formatted_value = self.format_number_for_register(value, register_index, 35);
-            lines.push(format!("{} {:<35}", register_names[i], formatted_value));
+    fn toggle_programming_mode(&mut self) -> Result<Option<String>, String> {
+        let was_on = self.programming.is_programming;
+        self.programming.toggle_programming_mode();
+        Ok(Some(if was_on {
+            "Programming mode OFF".to_string()
+        } else {
+            "Programming mode ON".to_string()
+        }))
+    }
+
+    fn toggle_flags(&mut self) -> Option<String> {
+        self.show_flags = !self.show_flags;
+        None
+    }
+
+    fn handle_backspace(&mut self) -> Result<Option<String>, String> {
+        if !self.command_buffer.is_empty() {
+            self.command_buffer.pop();
+        } else if self.input.is_entering() {
+            if let Some(value) = self.input.handle_backspace() {
+                self.stack.set_x(value);
+            }
         }
+        Ok(None)
+    }
 
-        // Status line
-        let mut status_parts = Vec::new();
+    fn handle_operator(&mut self, op: &str) -> Result<Option<String>, String> {
+        if self.programming.is_programming {
+            self.programming.add_instruction(op, None, op);
+            Ok(None)
+        } else {
+            self.process_input_as_command(op)
+        }
+    }
+
+    fn handle_digit(&mut self, key: &str) -> Result<Option<String>, String> {
+        if self.programming.is_programming && self.command_buffer.is_empty() {
+            self.programming.add_instruction(key, None, key);
+            Ok(None)
+        } else if !self.command_buffer.is_empty() {
+            self.command_buffer.push_str(key);
+            self.check_auto_execute()
+        } else {
+            // Number entry
+            if !self.input.is_entering() && self.stack.should_lift() {
+                self.stack.lift();
+            }
+            let ch = key.chars().next().unwrap();
+            match self.input.handle_digit(ch) {
+                Ok(Some(value)) => {
+                    self.stack.set_x(value);
+                    self.stack.set_lift_flag(false);
+                    Ok(None)
+                }
+                Ok(None) => Ok(None),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+    }
+
+    fn handle_enter(&mut self) -> Result<Option<String>, String> {
+        if !self.command_buffer.is_empty() {
+            self.process_command()
+        } else {
+            self.process_input_as_command("enter")
+        }
+    }
+
+    fn handle_space(&mut self) -> Result<Option<String>, String> {
+        if !self.command_buffer.is_empty() {
+            self.process_command()
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn handle_letter(&mut self, letter: &str) -> Result<Option<String>, String> {
+        self.command_buffer.push_str(&letter.to_lowercase());
         
-        // Special handling for commands waiting for arguments
-        let cmd_display = if self.command_buffer == "fix " {
-            "CMD: [fix _]".to_string()
-        } else if self.command_buffer == "sci " {
-            "CMD: [sci _]".to_string()
-        } else if self.command_buffer == "eng " {
-            "CMD: [eng _]".to_string()
-        } else if self.command_buffer == "sto " {
-            "CMD: [sto __]".to_string()
-        } else if self.command_buffer == "rcl " {
-            "CMD: [rcl __]".to_string()
-        } else if self.command_buffer.starts_with("sto ") || self.command_buffer.starts_with("rcl ") {
-            let parts: Vec<&str> = self.command_buffer.split_whitespace().collect();
-            if parts.len() == 2 && parts[1].len() == 1 {
-                // Show one digit and underscore for second digit
-                format!("CMD: [{} {}_]", parts[0], parts[1])
-            } else {
-                format!("CMD: [{}]", self.command_buffer)
+        let (valid, complete, _) = self.command_trie.search(&self.command_buffer);
+        
+        if !valid {
+            self.command_buffer.pop();
+            Err("Invalid command".to_string())
+        } else if complete && !self.needs_arguments(&self.command_buffer) {
+            self.process_command()
+        } else if self.needs_arguments(&self.command_buffer) {
+            self.command_buffer.push(' ');
+            Ok(None)
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn process_input_as_command(&mut self, cmd: &str) -> Result<Option<String>, String> {
+        self.command_buffer = cmd.to_string();
+        self.process_command()
+    }
+
+    fn needs_arguments(&self, cmd: &str) -> bool {
+        matches!(cmd, "lbl" | "gto" | "xeq" | "fix" | "sci" | "eng" | "sto" | "rcl")
+    }
+
+    fn check_auto_execute(&mut self) -> Result<Option<String>, String> {
+        let parts: Vec<&str> = self.command_buffer.split_whitespace().collect();
+        if parts.len() >= 2 {
+            match parts[0] {
+                "fix" | "sci" | "eng" if parts[1].len() == 1 => self.process_command(),
+                "sto" | "rcl" if parts[1].len() == 2 => self.process_command(),
+                _ => Ok(None),
             }
         } else {
-            format!("CMD: [{}]", self.command_buffer)
-        };
-        status_parts.push(cmd_display);
+            Ok(None)
+        }
+    }
+
+    fn add_stack_display(&self, lines: &mut Vec<String>) {
+        let registers = self.stack.get_registers();
+        let names = ["T:", "Z:", "Y:", "X:"];
+        
+        for i in 0..4 {
+            let value = registers[3 - i];
+            let formatted = if i == 3 && self.input.is_entering() {
+                self.input.get_display_string()
+            } else {
+                self.display_formatter.format_number(value, 35)
+            };
+            lines.push(format!("{} {:<35}", names[i], formatted));
+        }
+    }
+
+    fn build_status_line(&self) -> String {
+        let mut parts = vec![self.build_command_display()];
         
         if self.show_flags {
-            status_parts.push(format!("EN:{}", if self.entering_number { 1 } else { 0 }));
-            status_parts.push(format!("EEX:{}", if self.eex_mode { 1 } else { 0 }));
-            status_parts.push(format!("SL:{}", if self.stack_lifted { 1 } else { 0 }));
-            if self.arc_mode {
-                status_parts.push("ARC".to_string());
-            }
+            parts.push(format!("EN:{}", if self.input.is_entering() { 1 } else { 0 }));
+            parts.push(format!("EEX:{}", if self.input.is_eex_mode() { 1 } else { 0 }));
+            parts.push(format!("SL:{}", if self.stack.should_lift() { 1 } else { 0 }));
         }
-
-        // Always show display mode
-        status_parts.push(self.display_formatter.get_mode_string());
+        
+        parts.push(self.display_formatter.get_mode_string());
         
         if self.programming.is_programming {
-            status_parts.push("PRGM".to_string());
-            status_parts.push(format!("L{:02}", self.programming.current_line));
+            parts.push("PRGM".to_string());
+            parts.push(format!("L{:02}", self.programming.current_line));
         }
-        if self.programming.is_running {
-            status_parts.push("RUN".to_string());
-            if self.programming.get_current_instruction().is_some() {
-                status_parts.push(format!("PC{:02}", self.programming.program_counter));
+        
+        parts.join(" ")
+    }
+
+    fn build_command_display(&self) -> String {
+        let display = match self.command_buffer.as_str() {
+            "fix " => "CMD: [fix _]",
+            "sci " => "CMD: [sci _]",
+            "eng " => "CMD: [eng _]",
+            "sto " => "CMD: [sto __]",
+            "rcl " => "CMD: [rcl __]",
+            buffer if buffer.starts_with("sto ") || buffer.starts_with("rcl ") => {
+                let parts: Vec<&str> = buffer.split_whitespace().collect();
+                if parts.len() == 2 && parts[1].len() == 1 {
+                    return format!("CMD: [{} {}_]", parts[0], parts[1]);
+                }
+                return format!("CMD: [{}]", buffer);
             }
-        }
+            buffer => return format!("CMD: [{}]", buffer),
+        };
+        display.to_string()
+    }
 
-        lines.push(status_parts.join(" "));
-
-        // Program display line
+    fn build_program_line(&self) -> String {
         if self.programming.is_programming {
-            if let Some(current_instr) = self.programming.program.get(self.programming.current_line as usize - 1) {
-                lines.push(format!(">{:02} {}", current_instr.line_number, current_instr));
+            if let Some(instr) = self.programming.get_current_instruction() {
+                format!(">{:02} {}", instr.line_number, instr)
             } else {
-                lines.push(format!(">{:02} _", self.programming.current_line));
+                format!(">{:02} _", self.programming.current_line)
             }
         } else if !self.programming.program.is_empty() {
-            // In run mode with a program, show current program position
-            if let Some(current_instr) = self.programming.get_current_instruction() {
-                lines.push(format!(" {:02} {}", current_instr.line_number, current_instr));
+            if let Some(instr) = self.programming.get_current_instruction() {
+                format!(" {:02} {}", instr.line_number, instr)
             } else {
-                lines.push(format!(" {:02} END", self.programming.program_counter + 1));
+                format!(" {:02} END", self.programming.program_counter + 1)
             }
         } else {
-            lines.push("".to_string());
+            String::new()
         }
-
-        // Command reference lines
-        lines.push("sin cos tan asin acos atan log ln exp sqrt".to_string());
-        if self.show_flags {
-            lines.push("pi inv arc  clx clr chs  +/-*^ ! ⌫  : lbl gto xeq sto rcl  F".to_string());
-        } else {
-            lines.push("pi inv arc  clx clr chs  +/-*^ ! ⌫  : fix sci eng sto rcl  F(flags)".to_string());
-        }
-
-        // Pad to exactly 8 rows
-        while lines.len() < 8 {
-            lines.push("".to_string());
-        }
-
-        lines.into_iter().take(8).collect::<Vec<_>>().join("\n")
-    }
-
-    fn format_number_for_register(&self, value: f64, register_index: usize, width: usize) -> String {
-        // Only show raw input string for X register (index 0) when entering a number
-        if self.entering_number && !self.number_entry_string.is_empty() && register_index == 0 {
-            return format!("{}_", self.number_entry_string);  // Add underscore for number entry
-        }
-        
-        // Otherwise format the computed value normally
-        self.display_formatter.format_number(value, width)
     }
 }
 
-// Simple gamma function approximation for factorial
-fn gamma(x: f64) -> f64 {
-    if x == 1.0 {
-        1.0
-    } else if x < 1.0 {
-        gamma(x + 1.0) / x
-    } else {
-        (x - 1.0) * gamma(x - 1.0)
+impl Default for HP41CCalculator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// Provide read-only access for tests
+#[cfg(test)]
+impl HP41CCalculator {
+    pub fn test_get_stack(&self) -> &[f64] {
+        self.stack.get_registers()
+    }
+    
+    pub fn test_get_storage(&self, register: usize) -> Option<f64> {
+        self.storage_registers.get(register).copied()
+    }
+
+    pub fn test_get_stack(&self) -> &[f64] {
+        self.stack.get_registers()
+    }
+    
+    pub fn test_get_storage(&self, register: usize) -> Option<f64> {
+        self.storage_registers.get(register).copied()
+    }
+    
+    // Additional test accessors you might want:
+    
+    pub fn test_get_command_buffer(&self) -> &str {
+        &self.command_buffer
+    }
+    
+    pub fn test_is_programming(&self) -> bool {
+        self.programming.is_programming
+    }
+    
+    pub fn test_get_program_counter(&self) -> usize {
+        self.programming.program_counter
+    }
+    
+    pub fn test_get_current_line(&self) -> i32 {
+        self.programming.current_line
+    }
+    
+    pub fn test_get_display_mode(&self) -> &DisplayMode {
+        &self.display_formatter.mode
+    }
+    
+    pub fn test_get_display_digits(&self) -> usize {
+        self.display_formatter.digits
+    }
+    
+    pub fn test_is_input_entering(&self) -> bool {
+        self.input.is_entering()
+    }
+    
+    pub fn test_get_program_length(&self) -> usize {
+        self.programming.program.len()
+    }
+    
+    pub fn test_set_x_register(&mut self, value: f64) {
+        self.stack.set_x(value);
+    }
+    
+    pub fn test_clear_command_buffer(&mut self) {
+        self.command_buffer.clear();
+    }
+
+    pub fn test_get_stack(&self) -> &[f64] {
+        self.stack.get_registers()
+    }
+    
+    pub fn test_get_storage(&self, register: usize) -> Option<f64> {
+        self.storage_registers.get(register).copied()
+    }
+    
+    pub fn test_get_command_buffer(&self) -> &str {
+        &self.command_buffer
+    }
+    
+    pub fn test_is_programming(&self) -> bool {
+        self.programming.is_programming
+    }
+    
+    pub fn test_get_program_counter(&self) -> usize {
+        self.programming.program_counter
+    }
+    
+    pub fn test_get_current_line(&self) -> i32 {
+        self.programming.current_line
+    }
+    
+    pub fn test_get_display_mode(&self) -> &DisplayMode {
+        &self.display_formatter.mode
+    }
+    
+    pub fn test_get_display_digits(&self) -> usize {
+        self.display_formatter.digits
+    }
+    
+    pub fn test_is_input_entering(&self) -> bool {
+        self.input.is_entering()
+    }
+    
+    pub fn test_get_program_length(&self) -> usize {
+        self.programming.program.len()
+    }
+    
+    pub fn test_set_x_register(&mut self, value: f64) {
+        self.stack.set_x(value);
+    }
+    
+    pub fn test_clear_command_buffer(&mut self) {
+        self.command_buffer.clear();
+    }
+    
+    pub fn test_get_show_flags(&self) -> bool {
+        self.show_flags
+    }
+    
+    pub fn test_add_program_instruction(&mut self, cmd: &str, args: Option<Vec<String>>) {
+        self.programming.add_instruction(cmd, args, cmd);
     }
 }

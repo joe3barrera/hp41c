@@ -56,90 +56,45 @@ fn run_calculator(calc: &mut HP41CCalculator) -> Result<(), Box<dyn std::error::
             
             match code {
                 KeyCode::Char('c') if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => break,
-                KeyCode::Char('F') => {
-                    // Toggle flags display
-                    calc.show_flags = !calc.show_flags;
-                }
                 KeyCode::Char('q') => break,
                 KeyCode::Esc => break,
                 KeyCode::Enter => {
-                    // Enter key behavior depends on context
-                    if !calc.command_buffer.is_empty() {
-                        // If we have any command buffer content, process it as a command
-                        match calc.process_command() {
-                            Ok(Some(msg)) => {
-                                println!("\r>>> {}\r", msg);
-                                std::thread::sleep(std::time::Duration::from_millis(500));
-                            }
-                            Err(msg) => {
-                                println!("\r>>> ERROR: {}\r", msg);
-                                std::thread::sleep(std::time::Duration::from_millis(500));
-                            }
-                            Ok(None) => {}
+                    match calc.process_input("enter") {
+                        Ok(Some(msg)) => {
+                            println!("\r>>> {}\r", msg);
+                            std::thread::sleep(std::time::Duration::from_millis(500));
                         }
-                    } else {
-                        // Execute ENTER command (stack lift) - this handles number entry completion
-                        match calc.process_input("enter") {
-                            Ok(Some(msg)) => {
-                                println!("\r>>> {}\r", msg);
-                                std::thread::sleep(std::time::Duration::from_millis(500));
-                            }
-                            Err(msg) => {
-                                println!("\r>>> ERROR: {}\r", msg);
-                                std::thread::sleep(std::time::Duration::from_millis(500));
-                            }
-                            Ok(None) => {}
+                        Err(msg) => {
+                            println!("\r>>> ERROR: {}\r", msg);
+                            std::thread::sleep(std::time::Duration::from_millis(500));
                         }
+                        Ok(None) => {}
                     }
                 }
                 KeyCode::Char(' ') => {
-                    // Space adds to command buffer or completes commands
-                    if !calc.command_buffer.is_empty() {
-                        // Add space to command buffer to separate command from arguments
-                        calc.command_buffer.push(' ');
+                    match calc.process_input(" ") {
+                        Ok(Some(msg)) => {
+                            println!("\r>>> {}\r", msg);
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                        }
+                        Err(msg) => {
+                            println!("\r>>> ERROR: {}\r", msg);
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                        }
+                        Ok(None) => {}
                     }
                 }
                 KeyCode::Char(c) => {
-                    // Handle digits and letters differently
-                    if c.is_ascii_digit() || c == '.' {
-                        // Process digits immediately as number input
-                        match calc.process_input(&c.to_string()) {
-                            Ok(Some(msg)) => {
-                                println!("\r>>> {}\r", msg);
-                                std::thread::sleep(std::time::Duration::from_millis(500));
-                            }
-                            Err(msg) => {
-                                println!("\r>>> ERROR: {}\r", msg);
-                                std::thread::sleep(std::time::Duration::from_millis(500));
-                            }
-                            Ok(None) => {}
+                    match calc.process_input(&c.to_string()) {
+                        Ok(Some(msg)) => {
+                            println!("\r>>> {}\r", msg);
+                            std::thread::sleep(std::time::Duration::from_millis(500));
                         }
-                    } else if c.is_ascii_alphabetic() {
-                        // Process letters as command building
-                        match calc.process_input(&c.to_string()) {
-                            Ok(Some(msg)) => {
-                                println!("\r>>> {}\r", msg);
-                                std::thread::sleep(std::time::Duration::from_millis(500));
-                            }
-                            Err(msg) => {
-                                println!("\r>>> ERROR: {}\r", msg);
-                                std::thread::sleep(std::time::Duration::from_millis(500));
-                            }
-                            Ok(None) => {}
+                        Err(msg) => {
+                            println!("\r>>> ERROR: {}\r", msg);
+                            std::thread::sleep(std::time::Duration::from_millis(500));
                         }
-                    } else {
-                        // Handle other characters (operators, etc.)
-                        match calc.process_input(&c.to_string()) {
-                            Ok(Some(msg)) => {
-                                println!("\r>>> {}\r", msg);
-                                std::thread::sleep(std::time::Duration::from_millis(500));
-                            }
-                            Err(msg) => {
-                                println!("\r>>> ERROR: {}\r", msg);
-                                std::thread::sleep(std::time::Duration::from_millis(500));
-                            }
-                            Ok(None) => {}
-                        }
+                        Ok(None) => {}
                     }
                 }
                 KeyCode::Backspace => {
