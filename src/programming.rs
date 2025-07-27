@@ -79,7 +79,7 @@ impl ProgrammingMode {
             self.is_running = false; // Pause after single step
             
             // Execute the instruction
-            calc.execute_command(&instruction.command, Some(instruction.arguments))?;
+            calc.execute_command(&instruction.command, Some(instruction.arguments.clone()))?;
             Ok(Some(format!("SST: {}", instruction)))
         } else {
             Ok(Some(".END. 49".to_string()))

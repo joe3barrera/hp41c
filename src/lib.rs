@@ -8,6 +8,9 @@ pub mod input;
 pub mod error;
 pub mod execution;
 
+#[cfg(test)]
+mod tests;
+
 pub use calculator::HP41CCalculator;
 pub use programming::{ProgrammingMode, ProgramInstruction};
 pub use display::{DisplayMode, DisplayFormatter};

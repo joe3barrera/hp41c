@@ -5,13 +5,11 @@
 /// is definitely not pining for the fjords.
 
 use crate::programming::ProgrammingMode;
-//use crate::display::{DisplayMode, DisplayFormatter};
 use crate::display::{DisplayFormatter};
 use crate::commands::{CommandTrie, initialize_command_trie};
 use crate::stack::Stack;
 use crate::input::InputState;
 use crate::execution::execute_command;
-//use crate::error::{CalculatorError, CalculatorResult};
 
 /// Maximum number of storage registers
 const NUM_STORAGE_REGISTERS: usize = 100;
@@ -63,7 +61,7 @@ impl HP41CCalculator {
             "+" | "-" | "*" | "/" | "^" | "!" => self.handle_operator(key),
             
             // Numbers and decimal
-            "." | "0"..="9" => self.handle_digit(key),
+            "." | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => self.handle_digit(key),
             
             // Enter key
             "enter" => self.handle_enter(),
@@ -100,6 +98,19 @@ impl HP41CCalculator {
         }.to_string());
         
         lines.join("\n")
+    }
+
+    /// Execute a command with the given arguments (for internal use)
+    pub fn execute_command(&mut self, command: &str, args: Option<Vec<String>>) -> Result<Option<String>, String> {
+        execute_command(
+            command,
+            args,
+            &mut self.stack,
+            &mut self.input,
+            &mut self.programming,
+            &mut self.display_formatter,
+            &mut self.storage_registers,
+        ).map_err(|e| e.to_string())
     }
 
     /// Process a complete command
@@ -329,64 +340,6 @@ impl Default for HP41CCalculator {
 // Provide read-only access for tests
 #[cfg(test)]
 impl HP41CCalculator {
-    pub fn test_get_stack(&self) -> &[f64] {
-        self.stack.get_registers()
-    }
-    
-    pub fn test_get_storage(&self, register: usize) -> Option<f64> {
-        self.storage_registers.get(register).copied()
-    }
-
-    pub fn test_get_stack(&self) -> &[f64] {
-        self.stack.get_registers()
-    }
-    
-    pub fn test_get_storage(&self, register: usize) -> Option<f64> {
-        self.storage_registers.get(register).copied()
-    }
-    
-    // Additional test accessors you might want:
-    
-    pub fn test_get_command_buffer(&self) -> &str {
-        &self.command_buffer
-    }
-    
-    pub fn test_is_programming(&self) -> bool {
-        self.programming.is_programming
-    }
-    
-    pub fn test_get_program_counter(&self) -> usize {
-        self.programming.program_counter
-    }
-    
-    pub fn test_get_current_line(&self) -> i32 {
-        self.programming.current_line
-    }
-    
-    pub fn test_get_display_mode(&self) -> &DisplayMode {
-        &self.display_formatter.mode
-    }
-    
-    pub fn test_get_display_digits(&self) -> usize {
-        self.display_formatter.digits
-    }
-    
-    pub fn test_is_input_entering(&self) -> bool {
-        self.input.is_entering()
-    }
-    
-    pub fn test_get_program_length(&self) -> usize {
-        self.programming.program.len()
-    }
-    
-    pub fn test_set_x_register(&mut self, value: f64) {
-        self.stack.set_x(value);
-    }
-    
-    pub fn test_clear_command_buffer(&mut self) {
-        self.command_buffer.clear();
-    }
-
     pub fn test_get_stack(&self) -> &[f64] {
         self.stack.get_registers()
     }
