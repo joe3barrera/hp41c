@@ -79,7 +79,9 @@ pub fn execute_command(
         
         // Storage
         "sto" | "rcl" => {
-            execute_storage_command(&command, args, stack, storage)
+	    let result = execute_storage_command(&command, args, stack, storage)?;
+	    input.clear();
+	    Ok(result)
         }
         
         // Special

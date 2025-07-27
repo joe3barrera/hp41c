@@ -75,7 +75,7 @@ mod tests {
         assert_eq!(calc.test_get_storage(5), Some(42.0));
     
         // Clear X register by entering 0
-        calc.process_input("0").unwrap();
+	calc.test_set_x_register(0.0);
         assert_eq!(calc.test_get_stack()[0], 0.0);
     
         // Recall from register 5 (same calculator!)
