@@ -6,12 +6,12 @@
 
 use crate::programming::ProgrammingMode;
 use crate::display::DisplayFormatter;
+#[cfg(test)]
+use crate::display::DisplayMode;
 use crate::commands::{CommandTrie, initialize_command_trie};
 use crate::stack::Stack;
 use crate::input::InputState;
 use crate::execution::execute_command;
-#[cfg(test)]
-use crate::display::DisplayMode;
 
 /// Maximum number of storage registers
 const NUM_STORAGE_REGISTERS: usize = 100;
@@ -49,6 +49,19 @@ impl HP41CCalculator {
             storage_registers: [0.0; NUM_STORAGE_REGISTERS],
             show_flags: false,
         }
+    }
+
+    /// Execute a command with the given arguments (for internal use)
+    pub fn execute_command(&mut self, command: &str, args: Option<Vec<String>>) -> Result<Option<String>, String> {
+        execute_command(
+            command,
+            args,
+            &mut self.stack,
+            &mut self.input,
+            &mut self.programming,
+            &mut self.display_formatter,
+            &mut self.storage_registers,
+        ).map_err(|e| e.to_string())
     }
 
     /// Process a single keystroke
@@ -100,19 +113,6 @@ impl HP41CCalculator {
         }.to_string());
         
         lines.join("\n")
-    }
-
-    /// Execute a command with the given arguments (for internal use)
-    pub fn execute_command(&mut self, command: &str, args: Option<Vec<String>>) -> Result<Option<String>, String> {
-        execute_command(
-            command,
-            args,
-            &mut self.stack,
-            &mut self.input,
-            &mut self.programming,
-            &mut self.display_formatter,
-            &mut self.storage_registers,
-        ).map_err(|e| e.to_string())
     }
 
     /// Process a complete command
@@ -258,7 +258,7 @@ impl HP41CCalculator {
         if parts.len() >= 2 {
             match parts[0] {
                 "fix" | "sci" | "eng" if parts[1].len() == 1 => self.process_command(),
-                "sto" | "rcl" if parts[1].len() >= 1 => self.process_command(), // Changed: accept 1 or more digits
+                "sto" | "rcl" if parts[1].len() >= 1 => self.process_command(),
                 _ => Ok(None),
             }
         } else {
@@ -404,7 +404,7 @@ impl HP41CCalculator {
     }
 
     pub fn process_command_string(&mut self, cmd: &str) -> Result<Option<String>, String> {
-    	self.command_buffer = cmd.to_string();
+        self.command_buffer = cmd.to_string();
         self.process_command()
     }
 }
