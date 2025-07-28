@@ -11,10 +11,10 @@ pub mod execution;
 #[cfg(test)]
 mod tests;
 
-pub use calculator::HP41CCalculator;
+pub use calculator::{HP41CCalculator, CommandSpec, ArgumentPattern, AutoExecuteRule, ParseResult, CommandRegistry, CommandParser};
 pub use programming::{ProgrammingMode, ProgramInstruction};
 pub use display::{DisplayMode, DisplayFormatter};
-pub use commands::{CommandTrie, initialize_command_trie};
+pub use commands::{initialize_command_trie, CommandTrie}; // Backwards compatibility
 pub use error::{CalculatorError, CalculatorResult};
 pub use stack::Stack;
 pub use math::*;
