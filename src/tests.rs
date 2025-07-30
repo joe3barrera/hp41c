@@ -64,26 +64,26 @@ mod tests {
         calc.process_input("4").unwrap();
         calc.process_input("2").unwrap();
     
-        // Store in register 5
+        // Store in register 05 (NEW: 2-digit register, no space)
         calc.process_input("s").unwrap();
         calc.process_input("t").unwrap();
         calc.process_input("o").unwrap();
-        calc.process_input(" ").unwrap();
-        calc.process_input("5").unwrap();
+        calc.process_input("0").unwrap();  // FIXED: First digit of register
+        calc.process_input("5").unwrap();  // FIXED: Second digit of register
     
         // Check that it was stored
         assert_eq!(calc.test_get_storage(5), Some(42.0));
     
         // Clear X register by entering 0
-	calc.test_set_x_register(0.0);
+        calc.test_set_x_register(0.0);
         assert_eq!(calc.test_get_stack()[0], 0.0);
     
-        // Recall from register 5 (same calculator!)
+        // Recall from register 05 (NEW: 2-digit register, no space)
         calc.process_input("r").unwrap();
         calc.process_input("c").unwrap();
         calc.process_input("l").unwrap();
-        calc.process_input(" ").unwrap();
-        calc.process_input("5").unwrap();
+        calc.process_input("0").unwrap();  // FIXED: First digit of register
+        calc.process_input("5").unwrap();  // FIXED: Second digit of register
     
         // Check that it was recalled
         assert_eq!(calc.test_get_stack()[0], 42.0);
@@ -91,17 +91,17 @@ mod tests {
 
     #[test]
     fn test_display_modes() {
-        // Test FIX mode
-    	let (_calc, messages) = process_keys(&["f", "i", "x", " ", "6"]);
-    	assert!(messages.iter().any(|msg| msg.contains("FIX 6")));
+        // Test FIX mode (NEW: no space needed, auto-executes)
+        let (_calc, messages) = process_keys(&["f", "i", "x", "6"]);  // FIXED: removed space
+        assert!(messages.iter().any(|msg| msg.contains("FIX 6")));
     
-        // Test SCI mode  
-    	let (_calc, messages) = process_keys(&["s", "c", "i", " ", "3"]);
-	    assert!(messages.iter().any(|msg| msg.contains("SCI 3")));
+        // Test SCI mode (NEW: no space needed, auto-executes)  
+        let (_calc, messages) = process_keys(&["s", "c", "i", "3"]);  // FIXED: removed space
+        assert!(messages.iter().any(|msg| msg.contains("SCI 3")));
     
-        // Test ENG mode
-	let (_calc, messages) = process_keys(&["e", "n", "g", " ", "2"]);
-	assert!(messages.iter().any(|msg| msg.contains("ENG 2")));
+        // Test ENG mode (NEW: no space needed, auto-executes)
+        let (_calc, messages) = process_keys(&["e", "n", "g", "2"]);  // FIXED: removed space
+        assert!(messages.iter().any(|msg| msg.contains("ENG 2")));
     }
 
     #[test]
@@ -256,12 +256,69 @@ mod tests {
         // Display should contain command reference
         assert!(display.contains("sin cos tan"));
     }
+
+    // NEW: Test for 2-digit register building behavior
+    #[test]
+    fn test_register_building() {
+        let mut calc = HP41CCalculator::new();
+        
+        // Put 42 in X
+        calc.process_input("4").unwrap();
+        calc.process_input("2").unwrap();
+        
+        // Start STO command
+        calc.process_input("s").unwrap();
+        calc.process_input("t").unwrap();
+        calc.process_input("o").unwrap();
+        
+        // First digit should show "CMD: [sto]"
+        let buffer = calc.test_get_command_buffer();
+        assert!(buffer.contains("sto"));
+        
+        // Add first digit of register
+        calc.process_input("1").unwrap();
+        
+        // Should show "CMD: [sto 1_]" waiting for second digit
+        let buffer = calc.test_get_command_buffer();
+        assert!(buffer.contains("sto 1_"));
+        
+        // Add second digit - should execute
+        let result = calc.process_input("5").unwrap();
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("STO 15"));
+        
+        // Check storage worked
+        assert_eq!(calc.test_get_storage(15), Some(42.0));
+    }
+
+    // NEW: Test for immediate command execution
+    #[test]
+    fn test_immediate_commands() {
+        let mut calc = HP41CCalculator::new();
+        
+        // Put value on stack
+        calc.process_input("5").unwrap();
+        
+        // SIN should execute immediately
+        calc.process_input("s").unwrap();
+        calc.process_input("i").unwrap();
+        let result = calc.process_input("n").unwrap();
+        
+        // Should execute immediately and return result
+        assert!(result.is_none()); // SIN doesn't return a message, just executes
+        
+        // Stack should have sin(5)
+        let stack = calc.test_get_stack();
+        assert!((stack[0] - 5.0_f64.sin()).abs() < 1e-10);
+    }
 }
+
+// Updated debug tests for new system
 #[test]
 fn debug_display_command() {
     let mut calc = HP41CCalculator::new();
     
-    println!("=== Debug Display Command ===");
+    println!("=== Debug Display Command (NEW SYSTEM) ===");
     
     let result1 = calc.process_input("f");
     println!("After 'f': {:?}, buffer: '{}'", result1, calc.test_get_command_buffer());
@@ -272,11 +329,9 @@ fn debug_display_command() {
     let result3 = calc.process_input("x");
     println!("After 'x': {:?}, buffer: '{}'", result3, calc.test_get_command_buffer());
     
-    let result4 = calc.process_input(" ");
-    println!("After ' ': {:?}, buffer: '{}'", result4, calc.test_get_command_buffer());
-    
-    let result5 = calc.process_input("6");
-    println!("After '6': {:?}, buffer: '{}'", result5, calc.test_get_command_buffer());
+    // NEW: No space needed, just the digit
+    let result4 = calc.process_input("6");
+    println!("After '6': {:?}, buffer: '{}'", result4, calc.test_get_command_buffer());
     
     println!("Display mode: {:?}, digits: {}", calc.test_get_display_mode(), calc.test_get_display_digits());
 }
@@ -285,14 +340,14 @@ fn debug_display_command() {
 fn debug_storage_command() {
     let mut calc = HP41CCalculator::new();
     
-    println!("=== Debug Storage Command ===");
+    println!("=== Debug Storage Command (NEW SYSTEM) ===");
     
     // Put 42 in X
     calc.process_input("4").unwrap();
     calc.process_input("2").unwrap();
     println!("After entering 42: X = {}", calc.test_get_stack()[0]);
     
-    // Try STO 5 step by step
+    // Try STO 05 step by step (NEW: 2-digit register)
     let result1 = calc.process_input("s");
     println!("After 's': {:?}, buffer: '{}'", result1, calc.test_get_command_buffer());
     
@@ -302,9 +357,11 @@ fn debug_storage_command() {
     let result3 = calc.process_input("o");
     println!("After 'o': {:?}, buffer: '{}'", result3, calc.test_get_command_buffer());
     
-    let result4 = calc.process_input(" ");
-    println!("After ' ': {:?}, buffer: '{}'", result4, calc.test_get_command_buffer());
+    // NEW: First digit of register (no space)
+    let result4 = calc.process_input("0");
+    println!("After '0': {:?}, buffer: '{}'", result4, calc.test_get_command_buffer());
     
+    // NEW: Second digit of register (should execute)
     let result5 = calc.process_input("5");
     println!("After '5': {:?}, buffer: '{}'", result5, calc.test_get_command_buffer());
     
@@ -316,11 +373,11 @@ fn debug_storage_command() {
 fn debug_recall_command() {
     let mut calc = HP41CCalculator::new();
     
-    println!("=== Debug Recall Command ===");
+    println!("=== Debug Recall Command (NEW SYSTEM) ===");
     
     // First, manually store 42 in register 5
     calc.test_set_x_register(42.0);
-    let store_result = calc.execute_command("sto", Some(vec!["5".to_string()]));
+    let store_result = calc.execute_command("sto", Some(vec!["05".to_string()])); // NEW: 2-digit
     println!("Manual STO result: {:?}", store_result);
     println!("Storage register 5 after manual store: {:?}", calc.test_get_storage(5));
     
@@ -328,7 +385,7 @@ fn debug_recall_command() {
     calc.test_set_x_register(0.0);
     println!("X register cleared to: {}", calc.test_get_stack()[0]);
     
-    // Now try RCL step by step
+    // Now try RCL 05 step by step (NEW: 2-digit register)
     let result1 = calc.process_input("r");
     println!("After 'r': {:?}, buffer: '{}'", result1, calc.test_get_command_buffer());
     
@@ -338,9 +395,11 @@ fn debug_recall_command() {
     let result3 = calc.process_input("l");
     println!("After 'l': {:?}, buffer: '{}'", result3, calc.test_get_command_buffer());
     
-    let result4 = calc.process_input(" ");
-    println!("After ' ': {:?}, buffer: '{}'", result4, calc.test_get_command_buffer());
+    // NEW: First digit of register (no space)
+    let result4 = calc.process_input("0");
+    println!("After '0': {:?}, buffer: '{}'", result4, calc.test_get_command_buffer());
     
+    // NEW: Second digit of register (should execute)
     let result5 = calc.process_input("5");
     println!("After '5': {:?}, buffer: '{}'", result5, calc.test_get_command_buffer());
     

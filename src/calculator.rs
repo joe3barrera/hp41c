@@ -1,9 +1,6 @@
 /// HP-41C Calculator Core - Updated with Data-Driven Command System
 /// 
-/// This module coordinates between all the calculator subsystems to provide
-/// a complete HP-41C emulation. Unlike a Norwegian Blue HP-6S, this calculator
-/// is definitely not pining for the fjords - and now with 100% less hardcoded
-/// command logic sprawl!
+/// IMPORTANT: This is keystroke-by-keystroke processing, NOT command-line!
 
 use crate::programming::ProgrammingMode;
 use crate::display::DisplayFormatter;
@@ -12,16 +9,13 @@ use crate::display::DisplayMode;
 use crate::stack::Stack;
 use crate::input::InputState;
 use crate::execution::execute_command;
-
-// Import our new command system
 use std::collections::HashMap;
 
 /// Maximum number of storage registers
 const NUM_STORAGE_REGISTERS: usize = 100;
 
-// ===== NEW COMMAND SYSTEM =====
+// ===== COMMAND SYSTEM =====
 
-/// Specification for how a command should be parsed and executed
 #[derive(Debug, Clone)]
 pub struct CommandSpec {
     pub name: String,
@@ -30,72 +24,44 @@ pub struct CommandSpec {
     pub description: Option<String>,
 }
 
-/// Defines what kind of arguments a command expects
 #[derive(Debug, Clone)]
 pub enum ArgumentPattern {
-    /// Command takes no arguments (e.g., SIN, COS, ENTER)
     None,
-    
-    /// Single digit 0-9 (e.g., FIX 4, SCI 2)
     SingleDigit,
-    
-    /// Register number 00-99 (e.g., STO 15, RCL 07)
     Register,
-    
-    /// Label: single letter A-Z or number 0-9 (e.g., LBL A, GTO 5)
     Label,
-    
-    /// Alpha string for program names (e.g., XEQ "MYPROG")
     Alpha,
-    
-    /// Custom validation function
     Custom(fn(&str) -> bool),
 }
 
-/// When should the command execute
 #[derive(Debug, Clone)]
 pub enum AutoExecuteRule {
-    /// Execute immediately when command is complete (e.g., SIN, +)
     Immediate,
-    
-    /// Execute when arguments are complete (e.g., FIX 4, STO 15)
     OnComplete,
-    
-    /// Only execute on space or enter (e.g., some complex commands)
     Manual,
 }
 
-/// Result of parsing a command input
 #[derive(Debug, Clone)]
 pub enum ParseResult {
-    /// Still building the command, need more input
     Incomplete,
-    
-    /// Command is complete and ready to execute
     Complete { command: String, args: Option<Vec<String>> },
-    
-    /// Invalid input
     Invalid(String),
 }
 
-/// Registry of all known commands with their specifications
 #[derive(Debug)]
 pub struct CommandRegistry {
     specs: HashMap<String, CommandSpec>,
 }
 
 impl CommandRegistry {
-    /// Create a new registry with all HP-41C commands
     pub fn new() -> Self {
         let mut registry = CommandRegistry {
             specs: HashMap::new(),
         };
-        
         registry.register_all_commands();
         registry
     }
     
-    /// Register all HP-41C commands
     fn register_all_commands(&mut self) {
         // Math functions - no arguments, execute immediately
         for &cmd in &["sin", "cos", "tan", "asin", "acos", "atan", 
@@ -158,7 +124,7 @@ impl CommandRegistry {
             });
         }
         
-        // Program execution - can take label or alpha
+        // Program execution
         self.register(CommandSpec {
             name: "xeq".to_string(),
             arg_pattern: ArgumentPattern::Alpha,
@@ -202,23 +168,19 @@ impl CommandRegistry {
         });
     }
     
-    /// Register a single command specification
     pub fn register(&mut self, spec: CommandSpec) {
         self.specs.insert(spec.name.clone(), spec);
     }
     
-    /// Get specification for a command
     pub fn get_spec(&self, command: &str) -> Option<&CommandSpec> {
         self.specs.get(command)
     }
     
-    /// Get all registered command names
     pub fn get_command_names(&self) -> Vec<&String> {
         self.specs.keys().collect()
     }
 }
 
-/// Unified command parser that uses specifications
 #[derive(Debug)]
 pub struct CommandParser {
     registry: CommandRegistry,
@@ -227,7 +189,6 @@ pub struct CommandParser {
 }
 
 impl CommandParser {
-    /// Create a new parser
     pub fn new() -> Self {
         CommandParser {
             registry: CommandRegistry::new(),
@@ -236,111 +197,175 @@ impl CommandParser {
         }
     }
     
-    /// Clear current parsing state
     pub fn clear(&mut self) {
         self.current_command.clear();
         self.current_args.clear();
     }
     
-    /// Add input to the current command being built
     pub fn add_input(&mut self, input: &str) -> ParseResult {
-        // If we haven't started a command yet, this must be the command name
         if self.current_command.is_empty() {
             return self.start_command(input);
         }
         
-        // We're building arguments for an existing command
-        self.add_argument(input)
+        if self.registry.get_spec(&self.current_command).is_some() {
+            self.add_argument(input)
+        } else {
+            self.continue_building_command(input)
+        }
     }
     
-    /// Start parsing a new command
-    fn start_command(&mut self, command: &str) -> ParseResult {
-        let cmd_lower = command.to_lowercase();
+    fn start_command(&mut self, input: &str) -> ParseResult {
+        let input_lower = input.to_lowercase();
         
-        // Check if this is a valid command
-        if let Some(spec) = self.registry.get_spec(&cmd_lower) {
-            self.current_command = cmd_lower;
+        if let Some(spec) = self.registry.get_spec(&input_lower) {
+            self.current_command = input_lower;
             
-            // If command needs no arguments, it's complete
             if matches!(spec.arg_pattern, ArgumentPattern::None) {
+                // Command executes immediately - clear state and return complete
+                let command = self.current_command.clone();
+                self.clear(); // ← FIX: Clear state for immediate commands!
                 return ParseResult::Complete {
-                    command: self.current_command.clone(),
+                    command,
                     args: None,
                 };
             }
             
-            // Command needs arguments, wait for them
+            return ParseResult::Incomplete;
+        }
+        
+        self.current_command = input_lower;
+        
+        if self.could_be_command_prefix(&self.current_command) {
             ParseResult::Incomplete
         } else {
-            ParseResult::Invalid(format!("Unknown command: {}", command))
+            ParseResult::Invalid(format!("Unknown command: {}", input))
         }
     }
     
-    /// Add an argument to the current command
+    fn continue_building_command(&mut self, input: &str) -> ParseResult {
+        let input_lower = input.to_lowercase();
+        let new_command = format!("{}{}", self.current_command, input_lower);
+        
+        if let Some(spec) = self.registry.get_spec(&new_command) {
+            self.current_command = new_command;
+            
+            if matches!(spec.arg_pattern, ArgumentPattern::None) {
+                // Command executes immediately - clear state and return complete
+                let command = self.current_command.clone();
+                self.clear(); // ← FIX: Clear state for immediate commands here too!
+                return ParseResult::Complete {
+                    command,
+                    args: None,
+                };
+            }
+            
+            return ParseResult::Incomplete;
+        }
+        
+        if self.could_be_command_prefix(&new_command) {
+            self.current_command = new_command;
+            ParseResult::Incomplete
+        } else {
+            ParseResult::Invalid(format!("Unknown command: {}", new_command))
+        }
+    }
+    
+    fn could_be_command_prefix(&self, prefix: &str) -> bool {
+        self.registry.get_command_names().iter().any(|cmd| cmd.starts_with(prefix))
+    }
+    
     fn add_argument(&mut self, arg: &str) -> ParseResult {
         let spec = self.registry.get_spec(&self.current_command)
             .expect("Command should exist if we got here");
         
-        // Validate the argument against the pattern
-        if !self.is_valid_argument(arg, &spec.arg_pattern) {
-            return ParseResult::Invalid(format!("Invalid argument '{}' for {}", arg, self.current_command));
-        }
-        
-        self.current_args.push(arg.to_string());
-        
-        // Check if we have enough arguments
-        if self.is_complete(&spec.arg_pattern) {
-            match spec.auto_execute {
-                AutoExecuteRule::OnComplete => {
-                    // Command is complete and should execute
-                    let command = self.current_command.clone();
-                    let args = if self.current_args.is_empty() { 
-                        None 
-                    } else { 
-                        Some(self.current_args.clone()) 
-                    };
-                    
-                    self.clear();
-                    ParseResult::Complete { command, args }
+        match &spec.arg_pattern {
+            ArgumentPattern::Register => {
+                // Build up the register number digit by digit
+                if self.current_args.is_empty() {
+                    // First digit of register number
+                    if arg.len() == 1 && arg.chars().next().unwrap().is_ascii_digit() {
+                        self.current_args.push(arg.to_string());
+                        ParseResult::Incomplete // Wait for second digit
+                    } else {
+                        ParseResult::Invalid(format!("Register number must be digits, got '{}'", arg))
+                    }
+                } else {
+                    // Second digit of register number - complete the argument
+                    if arg.len() == 1 && arg.chars().next().unwrap().is_ascii_digit() {
+                        let full_register = format!("{}{}", self.current_args[0], arg);
+                        if let Ok(num) = full_register.parse::<u8>() {
+                            if num <= 99 {
+                                // Complete 2-digit register number
+                                self.current_args[0] = full_register;
+                                
+                                let command = self.current_command.clone();
+                                let args = Some(self.current_args.clone());
+                                self.clear();
+                                ParseResult::Complete { command, args }
+                            } else {
+                                ParseResult::Invalid(format!("Register number {} too large (max 99)", full_register))
+                            }
+                        } else {
+                            ParseResult::Invalid(format!("Invalid register number: {}", full_register))
+                        }
+                    } else {
+                        ParseResult::Invalid(format!("Register number must be digits, got '{}'", arg))
+                    }
                 }
-                _ => {
-                    // Command is complete but waiting for manual execution
+            }
+            
+            _ => {
+                // For other argument patterns, validate and complete immediately
+                if !self.is_valid_argument(arg, &spec.arg_pattern) {
+                    return ParseResult::Invalid(format!("Invalid argument '{}' for {}", arg, self.current_command));
+                }
+                
+                self.current_args.push(arg.to_string());
+                
+                if self.is_complete(&spec.arg_pattern) {
+                    match spec.auto_execute {
+                        AutoExecuteRule::OnComplete => {
+                            let command = self.current_command.clone();
+                            let args = if self.current_args.is_empty() { 
+                                None 
+                            } else { 
+                                Some(self.current_args.clone()) 
+                            };
+                            
+                            self.clear();
+                            ParseResult::Complete { command, args }
+                        }
+                        _ => {
+                            ParseResult::Incomplete
+                        }
+                    }
+                } else {
                     ParseResult::Incomplete
                 }
             }
-        } else {
-            ParseResult::Incomplete
         }
     }
     
-    /// Check if an argument is valid for the given pattern
     fn is_valid_argument(&self, arg: &str, pattern: &ArgumentPattern) -> bool {
         match pattern {
-            ArgumentPattern::None => false, // Shouldn't get arguments
+            ArgumentPattern::None => false,
             
             ArgumentPattern::SingleDigit => {
                 arg.len() == 1 && arg.chars().next().unwrap().is_ascii_digit()
             }
             
             ArgumentPattern::Register => {
-                // Accept 1-2 digits, representing register 0-99
-                if arg.len() > 2 { return false; }
-                if let Ok(num) = arg.parse::<u8>() {
-                    num <= 99
-                } else {
-                    false
-                }
+                // Register validation is now handled in add_argument method
+                true
             }
             
             ArgumentPattern::Label => {
-                // Single letter A-Z or digit 0-9
                 if arg.len() != 1 { return false; }
                 let ch = arg.chars().next().unwrap();
                 ch.is_ascii_alphanumeric()
             }
             
             ArgumentPattern::Alpha => {
-                // More flexible - letters, numbers, some symbols
                 !arg.is_empty() && arg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
             }
             
@@ -350,15 +375,17 @@ impl CommandParser {
         }
     }
     
-    /// Check if we have all required arguments
     fn is_complete(&self, pattern: &ArgumentPattern) -> bool {
         match pattern {
             ArgumentPattern::None => true,
-            _ => !self.current_args.is_empty(), // Most patterns need exactly one argument
+            ArgumentPattern::Register => {
+                // Register completion is handled in add_argument method
+                false // Never complete here - always handle in add_argument
+            }
+            _ => !self.current_args.is_empty(),
         }
     }
     
-    /// Force completion of current command (for manual execution)
     pub fn force_complete(&mut self) -> ParseResult {
         if self.current_command.is_empty() {
             return ParseResult::Invalid("No command to complete".to_string());
@@ -375,46 +402,40 @@ impl CommandParser {
         ParseResult::Complete { command, args }
     }
     
-    /// Get current parsing state for display
     pub fn get_current_state(&self) -> String {
         if self.current_command.is_empty() {
             "CMD: []".to_string()
         } else if self.current_args.is_empty() {
             format!("CMD: [{}]", self.current_command)
         } else {
-            format!("CMD: [{} {}]", self.current_command, self.current_args.join(" "))
+            // Special display for register numbers being built
+            if matches!(self.current_command.as_str(), "sto" | "rcl") && self.current_args.len() == 1 && self.current_args[0].len() == 1 {
+                format!("CMD: [{} {}_]", self.current_command, self.current_args[0])
+            } else {
+                format!("CMD: [{} {}]", self.current_command, self.current_args.join(" "))
+            }
         }
     }
     
-    /// Check if we're currently building a command
     pub fn is_building(&self) -> bool {
         !self.current_command.is_empty()
     }
 }
 
-// ===== UPDATED CALCULATOR =====
+// ===== CALCULATOR =====
 
-/// HP-41C Calculator State
 #[derive(Debug)]
 pub struct HP41CCalculator {
-    // Core components
     stack: Stack,
     input: InputState,
     programming: ProgrammingMode,
     display_formatter: DisplayFormatter,
-    
-    // NEW: Unified command processing
     command_parser: CommandParser,
-    
-    // Storage
     storage_registers: [f64; NUM_STORAGE_REGISTERS],
-    
-    // UI state
     show_flags: bool,
 }
 
 impl HP41CCalculator {
-    /// Create a new calculator instance
     pub fn new() -> Self {
         HP41CCalculator {
             stack: Stack::new(),
@@ -427,7 +448,6 @@ impl HP41CCalculator {
         }
     }
 
-    /// Execute a command with the given arguments (for internal use)
     pub fn execute_command(&mut self, command: &str, args: Option<Vec<String>>) -> Result<Option<String>, String> {
         execute_command(
             command,
@@ -440,44 +460,22 @@ impl HP41CCalculator {
         ).map_err(|e| e.to_string())
     }
 
-    /// Process a single keystroke - MUCH CLEANER NOW!
+    /// CRITICAL: This processes ONE keystroke at a time!
     pub fn process_input(&mut self, key: &str) -> Result<Option<String>, String> {
         match key {
-            // Special keys that bypass command parsing
             ":" => self.toggle_programming_mode(),
             "F" => Ok(self.toggle_flags()),
             "\u{8}" | "\u{7f}" => self.handle_backspace(),
-            
-            // Numbers and decimal go to number entry
             "." | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
                 self.handle_digit(key)
             }
-            
-            // Everything else goes through unified command processing
             _ => self.handle_command_input(key),
         }
     }
 
-    /// Handle command input using the new unified parser
     fn handle_command_input(&mut self, input: &str) -> Result<Option<String>, String> {
         match input {
             " " => {
-                // Space forces manual completion or acts as argument separator
-                if self.command_parser.is_building() {
-                    match self.command_parser.force_complete() {
-                        ParseResult::Complete { command, args } => {
-                            self.execute_command(&command, args)
-                        }
-                        ParseResult::Invalid(msg) => Err(msg),
-                        ParseResult::Incomplete => Ok(None), // Still building
-                    }
-                } else {
-                    Ok(None) // Space with no command does nothing
-                }
-            }
-            
-            "enter" => {
-                // Enter can either complete a command or do ENTER operation
                 if self.command_parser.is_building() {
                     match self.command_parser.force_complete() {
                         ParseResult::Complete { command, args } => {
@@ -487,38 +485,42 @@ impl HP41CCalculator {
                         ParseResult::Incomplete => Ok(None),
                     }
                 } else {
-                    // No command building, do regular ENTER
+                    Ok(None)
+                }
+            }
+            
+            "enter" => {
+                if self.command_parser.is_building() {
+                    match self.command_parser.force_complete() {
+                        ParseResult::Complete { command, args } => {
+                            self.execute_command(&command, args)
+                        }
+                        ParseResult::Invalid(msg) => Err(msg),
+                        ParseResult::Incomplete => Ok(None),
+                    }
+                } else {
                     self.handle_enter()
                 }
             }
             
             _ => {
-                // All other input goes to the command parser
                 match self.command_parser.add_input(input) {
                     ParseResult::Complete { command, args } => {
                         self.execute_command(&command, args)
                     }
                     ParseResult::Invalid(msg) => Err(msg),
-                    ParseResult::Incomplete => Ok(None), // Keep building
+                    ParseResult::Incomplete => Ok(None),
                 }
             }
         }
     }
 
-    /// Get the current display (for UI)
     pub fn get_display(&self) -> String {
         let mut lines = Vec::with_capacity(8);
         
-        // Stack display (4 lines)
         self.add_stack_display(&mut lines);
-        
-        // Status line
         lines.push(self.build_status_line());
-        
-        // Program line
         lines.push(self.build_program_line());
-        
-        // Command reference (2 lines)
         lines.push("sin cos tan asin acos atan log ln exp sqrt".to_string());
         lines.push(if self.show_flags {
             "pi inv arc  clx clr chs  +/-*^ ! ⌫  : lbl gto xeq sto rcl  F"
@@ -528,8 +530,6 @@ impl HP41CCalculator {
         
         lines.join("\n")
     }
-
-    // === Private Implementation Details - Much Simpler Now! ===
 
     fn toggle_programming_mode(&mut self) -> Result<Option<String>, String> {
         let was_on = self.programming.is_programming;
@@ -548,7 +548,6 @@ impl HP41CCalculator {
 
     fn handle_backspace(&mut self) -> Result<Option<String>, String> {
         if self.command_parser.is_building() {
-            // TODO: Add backspace support to command parser
             self.command_parser.clear();
         } else if self.input.is_entering() {
             if let Some(value) = self.input.handle_backspace() {
@@ -563,10 +562,8 @@ impl HP41CCalculator {
             self.programming.add_instruction(key, None, key);
             Ok(None)
         } else if self.command_parser.is_building() {
-            // Digit might be an argument to a command
             self.handle_command_input(key)
         } else {
-            // Regular number entry
             if !self.input.is_entering() && self.stack.should_lift() {
                 self.stack.lift();
             }
@@ -646,7 +643,7 @@ impl Default for HP41CCalculator {
     }
 }
 
-// Provide read-only access for tests
+// Test methods
 #[cfg(test)]
 impl HP41CCalculator {
     pub fn test_get_stack(&self) -> [f64; 4] {

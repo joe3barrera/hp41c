@@ -282,7 +282,7 @@ fn execute_display_command(
     Ok(Some(format!("{} {}", command.to_uppercase(), digits)))
 }
 
-// Storage commands
+// Storage commands - FIXED for proper stack lift behavior
 fn execute_storage_command(
     command: &str,
     args: Option<Vec<String>>,
@@ -300,6 +300,7 @@ fn execute_storage_command(
     match command {
         "sto" => {
             storage[register] = stack.x();
+            stack.set_lift_flag(true);  // ← FIX: Set lift flag so next operation lifts stack
             Ok(Some(format!("STO {:02}", register)))
         }
         "rcl" => {
