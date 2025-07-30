@@ -1,13 +1,13 @@
-/// Updated commands module - clean version without backwards compatibility
+/// Updated commands module - clean version using modular system
 /// 
-/// The old CommandTrie has been completely replaced by the data-driven command system
-/// built into the calculator. This module now provides clean helper functions.
+/// This module provides helper functions that use the new modular command system.
+/// The command system is now split into registry.rs and parser.rs for better organization.
 
-// Re-export the command system types
-pub use crate::calculator::{
-    CommandSpec, ArgumentPattern, AutoExecuteRule, ParseResult, 
-    CommandRegistry, CommandParser
+// Re-export the command system types from their new locations
+pub use crate::registry::{
+    CommandSpec, ArgumentPattern, AutoExecuteRule, CommandRegistry
 };
+pub use crate::parser::{CommandParser, ParseResult};
 
 /// Helper function to check if a string is a valid HP-41C command
 pub fn is_valid_command(command: &str) -> bool {
