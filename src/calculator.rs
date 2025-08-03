@@ -1,8 +1,8 @@
-/// HP-41C Calculator Core - Clean and Focused
+/// HP-41C Calculator Core - Clean and Focused with Comprehensive Logging
 /// 
 /// This module contains the main HP41CCalculator that coordinates between
 /// all calculator subsystems. The command system has been moved to separate
-/// modules for better organization.
+/// modules for better organization. Now includes integrated logging for debugging.
 
 use crate::programming::ProgrammingMode;
 use crate::display::DisplayFormatter;
@@ -12,11 +12,12 @@ use crate::stack::Stack;
 use crate::input::InputState;
 use crate::execution::execute_command;
 use crate::parser::{CommandParser, ParseResult};
+use crate::logger::Logger;  // NEW: Import logger
 
 /// Maximum number of storage registers
 const NUM_STORAGE_REGISTERS: usize = 100;
 
-/// HP-41C Calculator State
+/// HP-41C Calculator State with Integrated Logging
 /// 
 /// ## Keystroke-by-Keystroke Processing
 /// 
@@ -29,6 +30,7 @@ const NUM_STORAGE_REGISTERS: usize = 100;
 /// - User presses '4' → process single keystroke → "fix 4" executes immediately
 /// 
 /// Each call to `process_input(key)` receives exactly ONE character/keystroke.
+/// Now includes comprehensive logging for debugging calculator behavior.
 #[derive(Debug)]
 pub struct HP41CCalculator {
     // Core components
@@ -45,6 +47,9 @@ pub struct HP41CCalculator {
     
     // UI state
     show_flags: bool,
+    
+    // NEW: Integrated logger
+    logger: Logger,
 }
 
 impl HP41CCalculator {
@@ -58,23 +63,69 @@ impl HP41CCalculator {
             command_parser: CommandParser::new(),
             storage_registers: [0.0; NUM_STORAGE_REGISTERS],
             show_flags: false,
+            logger: Logger::new(),  // Default: minimal logging
         }
+    }
+    
+    /// Create a calculator with debug logging enabled
+    pub fn new_with_debug_logging() -> Self {
+        let mut calc = Self::new();
+        calc.logger = Logger::debug_all();
+        calc.logger.log_debug("INIT", "Calculator created with debug logging enabled");
+        calc
+    }
+    
+    /// Get mutable reference to logger for configuration
+    pub fn logger_mut(&mut self) -> &mut Logger {
+        &mut self.logger
+    }
+    
+    /// Get reference to logger for status
+    pub fn logger(&self) -> &Logger {
+        &self.logger
     }
 
     /// Execute a command with the given arguments (for internal use)
     pub fn execute_command(&mut self, command: &str, args: Option<Vec<String>>) -> Result<Option<String>, String> {
-        execute_command(
+        // Log command execution attempt
+        self.logger.log_command_execution(command, &args, "starting");
+        
+        // Capture stack state before execution
+        let stack_before = self.stack.get_registers();
+        
+        let result = execute_command(
             command,
-            args,
+            args.clone(),
             &mut self.stack,
             &mut self.input,
             &mut self.programming,
             &mut self.display_formatter,
             &mut self.storage_registers,
-        ).map_err(|e| e.to_string())
+        ).map_err(|e| e.to_string());
+        
+        // Log the result and any stack changes
+        match &result {
+            Ok(Some(msg)) => {
+                self.logger.log_command_execution(command, &args, msg);
+            }
+            Ok(None) => {
+                self.logger.log_command_execution(command, &args, "completed");
+            }
+            Err(e) => {
+                self.logger.log_command_execution(command, &args, &format!("ERROR: {}", e));
+            }
+        }
+        
+        // Log stack changes if they occurred
+        let stack_after = self.stack.get_registers();
+        if stack_before != stack_after {
+            self.logger.log_stack_operation(&format!("{} command", command), &stack_before, &stack_after);
+        }
+        
+        result
     }
 
-    /// Process a single keystroke
+    /// Process a single keystroke with comprehensive logging
     /// 
     /// ## CRITICAL: Single Keystroke Processing
     /// 
@@ -87,7 +138,13 @@ impl HP41CCalculator {
     /// 
     /// NOT like a command line where you'd call `process_input("fix 4")` all at once.
     pub fn process_input(&mut self, key: &str) -> Result<Option<String>, String> {
-        match key {
+        // Log every keystroke
+        self.logger.log_keystroke(key);
+        
+        // Log current state before processing
+        self.log_current_state("before processing");
+        
+        let result = match key {
             // Special keys that bypass command parsing
             ":" => self.toggle_programming_mode(),
             "F" => Ok(self.toggle_flags()),
@@ -100,15 +157,34 @@ impl HP41CCalculator {
             
             // Everything else goes through unified command processing
             _ => self.handle_command_input(key),
-        }
+        };
+        
+        // Log state after processing
+        self.log_current_state("after processing");
+        
+        result
+    }
+    
+    /// Log current calculator state (helper method)
+    fn log_current_state(&self, context: &str) {
+        self.logger.log_stack_state(&self.stack.get_registers(), context);
+        self.logger.log_input_state(
+            self.input.is_entering(), 
+            self.input.is_eex_mode(), 
+            &self.input.get_display_string()
+        );
+        self.logger.log_command_state(&self.command_parser.get_current_state(), context);
     }
 
     /// Handle command input using the unified parser
     fn handle_command_input(&mut self, input: &str) -> Result<Option<String>, String> {
+        self.logger.log_command_state(&self.command_parser.get_current_state(), "before input");
+        
         match input {
             " " => {
                 // Space forces manual completion or acts as argument separator
                 if self.command_parser.is_building() {
+                    self.logger.log_debug("PARSER", "Space pressed - forcing completion");
                     match self.command_parser.force_complete() {
                         ParseResult::Complete { command, args } => {
                             self.execute_command(&command, args)
@@ -117,6 +193,7 @@ impl HP41CCalculator {
                         ParseResult::Incomplete => Ok(None),
                     }
                 } else {
+                    self.logger.log_debug("PARSER", "Space pressed with no command - ignored");
                     Ok(None) // Space with no command does nothing
                 }
             }
@@ -124,6 +201,7 @@ impl HP41CCalculator {
             "enter" => {
                 // Enter can either complete a command or do ENTER operation
                 if self.command_parser.is_building() {
+                    self.logger.log_debug("PARSER", "Enter pressed - forcing command completion");
                     match self.command_parser.force_complete() {
                         ParseResult::Complete { command, args } => {
                             self.execute_command(&command, args)
@@ -133,6 +211,7 @@ impl HP41CCalculator {
                     }
                 } else {
                     // No command building, do regular ENTER
+                    self.logger.log_debug("STACK", "Enter pressed - performing ENTER operation");
                     self.handle_enter()
                 }
             }
@@ -141,10 +220,17 @@ impl HP41CCalculator {
                 // All other input goes to the command parser
                 match self.command_parser.add_input(input) {
                     ParseResult::Complete { command, args } => {
+                        self.logger.log_debug("PARSER", &format!("Command completed: {} {:?}", command, args));
                         self.execute_command(&command, args)
                     }
-                    ParseResult::Invalid(msg) => Err(msg),
-                    ParseResult::Incomplete => Ok(None), // Keep building
+                    ParseResult::Invalid(msg) => {
+                        self.logger.log_debug("PARSER", &format!("Invalid input: {}", msg));
+                        Err(msg)
+                    }
+                    ParseResult::Incomplete => {
+                        self.logger.log_debug("PARSER", "Command building continues");
+                        Ok(None) // Keep building
+                    }
                 }
             }
         }
@@ -157,7 +243,7 @@ impl HP41CCalculator {
         // Stack display (4 lines)
         self.add_stack_display(&mut lines);
         
-        // Status line
+        // Status line (now includes logging status)
         lines.push(self.build_status_line());
         
         // Program line
@@ -165,11 +251,12 @@ impl HP41CCalculator {
         
         // Command reference (2 lines)
         lines.push("sin cos tan asin acos atan log ln exp sqrt".to_string());
-        lines.push(if self.show_flags {
-            "pi inv arc  clx clr chs  +/-*^ ! ⌫  : lbl gto xeq sto rcl  F"
+        let cmd_line = if self.show_flags {
+            "pi inv arc  clx clr chs  +/-*^ ! ⌫  : lbl gto xeq sto rcl  F L"
         } else {
-            "pi inv arc  clx clr chs  +/-*^ ! ⌫  : fix sci eng sto rcl  F(flags)"
-        }.to_string());
+            "pi inv arc  clx clr chs  +/-*^ ! ⌫  : fix sci eng sto rcl  F L(log)"
+        };
+        lines.push(cmd_line.to_string());
         
         lines.join("\n")
     }
@@ -179,6 +266,12 @@ impl HP41CCalculator {
     fn toggle_programming_mode(&mut self) -> Result<Option<String>, String> {
         let was_on = self.programming.is_programming;
         self.programming.toggle_programming_mode();
+        
+        // Log the flag change
+        self.logger.log_flag_change("programming_mode", was_on, self.programming.is_programming);
+        self.logger.log_programming("mode_toggle", 
+            &format!("Programming mode {}", if self.programming.is_programming { "ON" } else { "OFF" }));
+        
         Ok(Some(if was_on {
             "Programming mode OFF".to_string()
         } else {
@@ -187,17 +280,31 @@ impl HP41CCalculator {
     }
 
     fn toggle_flags(&mut self) -> Option<String> {
+        let old_value = self.show_flags;
         self.show_flags = !self.show_flags;
+        
+        // Log the flag change
+        self.logger.log_flag_change("show_flags", old_value, self.show_flags);
+        
         None
     }
 
     fn handle_backspace(&mut self) -> Result<Option<String>, String> {
+        self.logger.log_debug("INPUT", "Backspace pressed");
+        
         if self.command_parser.is_building() {
+            self.logger.log_debug("PARSER", "Clearing command buffer");
             // TODO: Add backspace support to command parser
             self.command_parser.clear();
         } else if self.input.is_entering() {
+            self.logger.log_debug("INPUT", "Handling backspace during number entry");
+            let stack_before = self.stack.get_registers();
             if let Some(value) = self.input.handle_backspace() {
                 self.stack.set_x(value);
+                let stack_after = self.stack.get_registers();
+                if stack_before != stack_after {
+                    self.logger.log_stack_operation("backspace", &stack_before, &stack_after);
+                }
             }
         }
         Ok(None)
@@ -205,14 +312,22 @@ impl HP41CCalculator {
 
     fn handle_digit(&mut self, key: &str) -> Result<Option<String>, String> {
         if self.programming.is_programming && !self.command_parser.is_building() {
+            self.logger.log_programming("digit_entry", &format!("Adding digit '{}' to program", key));
             self.programming.add_instruction(key, None, key);
             Ok(None)
         } else if self.command_parser.is_building() {
             // Digit might be an argument to a command
+            self.logger.log_debug("PARSER", &format!("Adding digit '{}' as command argument", key));
             self.handle_command_input(key)
         } else {
             // Regular number entry
+            self.logger.log_debug("INPUT", &format!("Number entry: digit '{}'", key));
+            
+            let stack_before = self.stack.get_registers();
+            let should_lift_before = self.stack.should_lift();
+            
             if !self.input.is_entering() && self.stack.should_lift() {
+                self.logger.log_debug("STACK", "Lifting stack for new number entry");
                 self.stack.lift();
             }
             let ch = key.chars().next().unwrap();
@@ -220,6 +335,13 @@ impl HP41CCalculator {
                 Ok(Some(value)) => {
                     self.stack.set_x(value);
                     self.stack.set_lift_flag(false);
+                    
+                    let stack_after = self.stack.get_registers();
+                    if stack_before != stack_after || should_lift_before != self.stack.should_lift() {
+                        self.logger.log_stack_operation("digit_entry", &stack_before, &stack_after);
+                        self.logger.log_flag_change("stack_lift", should_lift_before, self.stack.should_lift());
+                    }
+                    
                     Ok(None)
                 }
                 Ok(None) => Ok(None),
@@ -229,6 +351,7 @@ impl HP41CCalculator {
     }
 
     fn handle_enter(&mut self) -> Result<Option<String>, String> {
+        self.logger.log_debug("STACK", "ENTER operation");
         self.execute_command("enter", None)
     }
 
@@ -263,6 +386,9 @@ impl HP41CCalculator {
             parts.push(format!("L{:02}", self.programming.current_line));
         }
         
+        // Add logging status (compact format)
+        parts.push(self.logger.get_config_string());
+        
         parts.join(" ")
     }
 
@@ -281,6 +407,34 @@ impl HP41CCalculator {
             }
         } else {
             String::new()
+        }
+    }
+    
+    /// NEW: Toggle logging on key press 'L'
+    pub fn toggle_logging(&mut self) -> Option<String> {
+        let was_enabled = self.logger.enabled;
+        let now_enabled = self.logger.toggle_enabled();
+        
+        Some(format!("Logging {}", if now_enabled { "ON" } else { "OFF" }))
+    }
+    
+    /// NEW: Configure logger with preset configurations
+    pub fn configure_logger(&mut self, preset: &str) -> Option<String> {
+        match preset {
+            "all" => {
+                self.logger = Logger::debug_all();
+                Some("Debug logging: ALL enabled".to_string())
+            }
+            "minimal" => {
+                self.logger = Logger::minimal();
+                Some("Debug logging: MINIMAL (flags + stack)".to_string())
+            }
+            "off" => {
+                self.logger = Logger::new();
+                self.logger.enabled = false;
+                Some("Debug logging: DISABLED".to_string())
+            }
+            _ => Some("Unknown logging preset".to_string())
         }
     }
 }
@@ -335,7 +489,10 @@ impl HP41CCalculator {
     }
     
     pub fn test_set_x_register(&mut self, value: f64) {
+        let stack_before = self.stack.get_registers();
         self.stack.set_x(value);
+        let stack_after = self.stack.get_registers();
+        self.logger.log_stack_operation("test_set_x", &stack_before, &stack_after);
     }
     
     pub fn test_clear_command_buffer(&mut self) {
@@ -366,5 +523,15 @@ impl HP41CCalculator {
                 }
             }
         }
+    }
+    
+    /// NEW: Test helper to enable debug logging
+    pub fn test_enable_debug_logging(&mut self) {
+        self.logger = Logger::debug_all();
+    }
+    
+    /// NEW: Test helper to configure specific logging
+    pub fn test_configure_logging(&mut self, flags: bool, stack: bool, input: bool, commands: bool) {
+        self.logger.set_flags(flags, stack, input, commands);
     }
 }

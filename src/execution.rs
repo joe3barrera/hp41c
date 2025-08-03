@@ -2,6 +2,7 @@
 /// 
 /// Handles the execution of all calculator commands including math functions,
 /// stack operations, programming commands, and storage operations.
+/// Now includes hooks for external logging of storage operations.
 
 use crate::stack::Stack;
 use crate::input::InputState;
@@ -11,6 +12,9 @@ use crate::display::{DisplayMode, DisplayFormatter};
 use crate::error::{CalculatorError, CommandError, StorageError, ProgrammingError};
 
 /// Execute a calculator command
+/// 
+/// Note: This function is called from the main calculator which handles logging.
+/// Storage operations and other key operations should be logged by the caller.
 pub fn execute_command(
     command: &str,
     args: Option<Vec<String>>,
@@ -77,7 +81,7 @@ pub fn execute_command(
             execute_display_command(&command, args, display)
         }
         
-        // Storage
+        // Storage - NOTE: External logging should capture these operations
         "sto" | "rcl" => {
 	    let result = execute_storage_command(&command, args, stack, storage)?;
 	    input.clear();
@@ -282,7 +286,8 @@ fn execute_display_command(
     Ok(Some(format!("{} {}", command.to_uppercase(), digits)))
 }
 
-// Storage commands - FIXED for proper stack lift behavior
+// Storage commands - IMPORTANT: These operations should be logged externally
+// The caller (calculator.rs) should log these storage operations
 fn execute_storage_command(
     command: &str,
     args: Option<Vec<String>>,
@@ -299,11 +304,13 @@ fn execute_storage_command(
 
     match command {
         "sto" => {
+            // IMPORTANT: The value being stored and register should be logged by caller
             storage[register] = stack.x();
-            stack.set_lift_flag(true);  // ← FIX: Set lift flag so next operation lifts stack
+            stack.set_lift_flag(true);  // Set lift flag so next operation lifts stack
             Ok(Some(format!("STO {:02}", register)))
         }
         "rcl" => {
+            // IMPORTANT: The value being recalled and register should be logged by caller
             if stack.should_lift() {
                 stack.lift();
             }

@@ -8,9 +8,12 @@ pub mod input;
 pub mod error;
 pub mod execution;
 
-// NEW: Modular command system
+// Modular command system
 pub mod registry;
 pub mod parser;
+
+// NEW: Logging system
+pub mod logger;
 
 #[cfg(test)]
 mod tests;
@@ -29,3 +32,6 @@ pub use error::{CalculatorError, CalculatorResult};
 pub use stack::Stack;
 pub use math::*;
 pub use input::InputState;
+
+// NEW: Logger exports
+pub use logger::Logger;
