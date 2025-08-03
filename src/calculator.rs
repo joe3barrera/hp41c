@@ -75,6 +75,21 @@ impl HP41CCalculator {
         calc
     }
     
+    /// Create a calculator with file logging enabled to a default location
+    pub fn new_with_file_logging() -> Result<Self, String> {
+        let mut calc = Self::new();
+        let log_path = "hp41c_debug.log";
+        calc.enable_file_logging(log_path)?;
+        calc.logger = crate::logger::Logger::debug_all();
+        match calc.logger.enable_file_logging(log_path) {
+            Ok(()) => {
+                calc.logger.log_debug("INIT", "Calculator created with file logging enabled");
+                Ok(calc)
+            }
+            Err(e) => Err(format!("Failed to initialize file logging: {}", e))
+        }
+    }
+    
     /// Get mutable reference to logger for configuration
     pub fn logger_mut(&mut self) -> &mut Logger {
         &mut self.logger
@@ -83,6 +98,33 @@ impl HP41CCalculator {
     /// Get reference to logger for status
     pub fn logger(&self) -> &Logger {
         &self.logger
+    }
+
+    /// Enable file logging to a specific path
+    pub fn enable_file_logging<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<Option<String>, String> {
+        match self.logger.enable_file_logging(path) {
+            Ok(()) => {
+                if let Some(path) = self.logger.get_log_file_path() {
+                    Ok(Some(format!("File logging enabled: {}", path.display())))
+                } else {
+                    Ok(Some("File logging enabled".to_string()))
+                }
+            }
+            Err(e) => Err(format!("Failed to enable file logging: {}", e))
+        }
+    }
+    
+    /// Disable file logging
+    pub fn disable_file_logging(&mut self) -> Result<Option<String>, String> {
+        match self.logger.disable_file_logging() {
+            Ok(()) => Ok(Some("File logging disabled".to_string())),
+            Err(e) => Err(format!("Failed to disable file logging: {}", e))
+        }
+    }
+    
+    /// Get current log file path
+    pub fn get_log_file_path(&self) -> Option<&std::path::Path> {
+        self.logger.get_log_file_path()
     }
 
     /// Execute a command with the given arguments (for internal use)
@@ -166,7 +208,7 @@ impl HP41CCalculator {
     }
     
     /// Log current calculator state (helper method)
-    fn log_current_state(&self, context: &str) {
+    fn log_current_state(&mut self, context: &str) {
         self.logger.log_stack_state(&self.stack.get_registers(), context);
         self.logger.log_input_state(
             self.input.is_entering(), 
@@ -412,7 +454,6 @@ impl HP41CCalculator {
     
     /// NEW: Toggle logging on key press 'L'
     pub fn toggle_logging(&mut self) -> Option<String> {
-        let was_enabled = self.logger.enabled;
         let now_enabled = self.logger.toggle_enabled();
         
         Some(format!("Logging {}", if now_enabled { "ON" } else { "OFF" }))

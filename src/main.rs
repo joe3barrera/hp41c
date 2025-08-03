@@ -29,7 +29,9 @@ fn run_calculator(calc: &mut HP41CCalculator) -> Result<(), Box<dyn std::error::
     println!("================================================================\r");
     println!("Enter ':' to toggle programming mode\r");
     println!("Enter 'q' to quit, 'F' to toggle flags, 'L' for logging\r");
-    println!("Logging shortcuts: Ctrl+L (toggle), Ctrl+A (all), Ctrl+M (minimal), Ctrl+O (off)\r");
+    println!("Logging shortcuts:\r");
+    println!("  Ctrl+L (toggle), Ctrl+A (all), Ctrl+M (minimal), Ctrl+O (off)\r");
+    println!("  Ctrl+F (enable file logging), Ctrl+D (disable file logging)\r");
     println!("\r");
 
     loop {
@@ -39,7 +41,14 @@ fn run_calculator(calc: &mut HP41CCalculator) -> Result<(), Box<dyn std::error::
         println!("================================================================\r");
         println!("Enter ':' to toggle programming mode\r");
         println!("Enter 'q' to quit, 'F' to toggle flags, 'L' for logging\r");
-        println!("Logging shortcuts: Ctrl+L (toggle), Ctrl+A (all), Ctrl+M (minimal), Ctrl+O (off)\r");
+        println!("Logging shortcuts:\r");
+        println!("  Ctrl+L (toggle), Ctrl+A (all), Ctrl+M (minimal), Ctrl+O (off)\r");
+        println!("  Ctrl+F (enable file logging), Ctrl+D (disable file logging)\r");
+        
+        // Show current log file if active
+        if let Some(path) = calc.get_log_file_path() {
+            println!("  📄 Logging to: {}\r", path.display());
+        }
         println!("\r");
         
         // Display calculator state
@@ -61,7 +70,7 @@ fn run_calculator(calc: &mut HP41CCalculator) -> Result<(), Box<dyn std::error::
                 KeyCode::Char('q') => break,
                 KeyCode::Esc => break,
                 
-                // NEW: Logging control shortcuts
+                // Logging control shortcuts
                 KeyCode::Char('l') if modifiers.contains(KeyModifiers::CONTROL) => {
                     if let Some(msg) = calc.toggle_logging() {
                         println!("\r>>> {}\r", msg);
@@ -84,6 +93,42 @@ fn run_calculator(calc: &mut HP41CCalculator) -> Result<(), Box<dyn std::error::
                     if let Some(msg) = calc.configure_logger("off") {
                         println!("\r>>> {}\r", msg);
                         std::thread::sleep(std::time::Duration::from_millis(1000));
+                    }
+                }
+                
+                // NEW: File logging controls
+                KeyCode::Char('f') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    let default_path = "hp41c_debug.log";
+                    match calc.enable_file_logging(default_path) {
+                        Ok(Some(msg)) => {
+                            println!("\r>>> {}\r", msg);
+                            println!("\r>>> You can now run: tail -f {} (in another terminal)\r", default_path);
+                            std::thread::sleep(std::time::Duration::from_millis(2000));
+                        }
+                        Ok(None) => {
+                            println!("\r>>> File logging enabled\r");
+                            std::thread::sleep(std::time::Duration::from_millis(1000));
+                        }
+                        Err(e) => {
+                            println!("\r>>> ERROR: {}\r", e);
+                            std::thread::sleep(std::time::Duration::from_millis(1000));
+                        }
+                    }
+                }
+                KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    match calc.disable_file_logging() {
+                        Ok(Some(msg)) => {
+                            println!("\r>>> {}\r", msg);
+                            std::thread::sleep(std::time::Duration::from_millis(1000));
+                        }
+                        Ok(None) => {
+                            println!("\r>>> File logging disabled\r");
+                            std::thread::sleep(std::time::Duration::from_millis(1000));
+                        }
+                        Err(e) => {
+                            println!("\r>>> ERROR: {}\r", e);
+                            std::thread::sleep(std::time::Duration::from_millis(1000));
+                        }
                     }
                 }
                 
